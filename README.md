@@ -49,6 +49,13 @@ Use this to run the app locally and exercise the current MVP end-to-end.
 - Run tests: `npm test`
 - Run production build: `npm run build`
 
+## Session handoff
+
+Use the latest handoff note when resuming from a new machine or a new session.
+
+- Current handoff: [SESSION-HANDOFF-2026-04-16.md](SESSION-HANDOFF-2026-04-16.md)
+- Recommendation: create a new dated `SESSION-HANDOFF-YYYY-MM-DD.md` at the end of each major work session.
+
 ## Reference material
 
 - `.github/skills/optics-math/SKILL.md`
