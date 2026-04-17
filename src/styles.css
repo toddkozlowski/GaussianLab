@@ -21,6 +21,8 @@ body {
   margin: 0;
   min-width: 320px;
   min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
 }
 
 button,
@@ -59,26 +61,30 @@ button:disabled {
 
 #root {
   min-height: 100vh;
+  height: 100vh;
 }
 
 .app-shell {
-  min-height: 100vh;
+  height: 100vh;
   display: grid;
-  grid-template-rows: 1fr auto;
-  padding: 24px;
+  grid-template-rows: 1fr;
+  padding: 16px;
   gap: 16px;
+  overflow: hidden;
 }
 
 .workspace {
   display: grid;
   grid-template-columns: minmax(260px, 320px) minmax(0, 1fr);
   gap: 16px;
+  min-height: 0;
 }
 
 .primary-pane {
   display: grid;
-  grid-template-rows: minmax(360px, 1fr) minmax(240px, 320px);
+  grid-template-rows: minmax(280px, 1.15fr) minmax(220px, 0.95fr);
   gap: 16px;
+  min-height: 0;
 }
 
 .panel {
@@ -112,15 +118,21 @@ button:disabled {
 
 .panel-body {
   padding: 20px;
+  min-height: 0;
 }
 
 .panel-body-canvas {
   height: 100%;
-  min-height: 260px;
+  min-height: 220px;
+  padding: 12px;
 }
 
 .panel-body-canvas > div {
-  min-height: 220px;
+  min-height: 0;
+}
+
+.canvas-panel .panel-body {
+  padding: 12px;
 }
 
 .canvas-placeholder,
@@ -139,6 +151,77 @@ button:disabled {
   display: grid;
   grid-template-rows: auto auto auto 1fr;
   gap: 16px;
+  min-height: 0;
+  overflow: auto;
+  padding-right: 4px;
+}
+
+.table-canvas-shell {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  border: 1px solid rgba(24, 33, 48, 0.2);
+  border-radius: 14px;
+  overflow: hidden;
+  background: #3b4249;
+}
+
+.canvas-selection-popover {
+  position: absolute;
+  z-index: 2;
+  min-width: 180px;
+  max-width: 260px;
+  background: rgba(255, 255, 255, 0.96);
+  border: 1px solid rgba(24, 33, 48, 0.16);
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  padding: 10px;
+  display: grid;
+  gap: 10px;
+}
+
+.canvas-selection-header {
+  font-size: 0.85rem;
+  font-weight: 700;
+  color: #34475a;
+}
+
+.canvas-selection-rotate-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.canvas-source-editor {
+  display: grid;
+  gap: 8px;
+}
+
+.canvas-source-editor label {
+  gap: 4px;
+  font-size: 0.8rem;
+}
+
+.canvas-source-editor input {
+  padding: 6px 8px;
+  border-radius: 8px;
+}
+
+.profile-chart-shell {
+  display: grid;
+  gap: 6px;
+}
+
+.profile-hover-readout {
+  font-size: 0.82rem;
+  color: #445a70;
+}
+
+details > summary {
+  cursor: pointer;
+  color: #445a70;
+  font-size: 0.9rem;
+  margin-bottom: 8px;
 }
 
 .status-bar {
@@ -185,6 +268,16 @@ button:disabled {
 }
 
 @media (max-width: 1024px) {
+  body {
+    overflow: auto;
+    height: auto;
+  }
+
+  #root,
+  .app-shell {
+    height: auto;
+  }
+
   .workspace {
     grid-template-columns: 1fr;
   }

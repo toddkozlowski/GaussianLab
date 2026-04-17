@@ -1,10 +1,11 @@
 /**
- * Grid Overlay: Draws grid pattern on canvas for visual reference
+ * Grid Overlay: Draws optical table area, border, and mounting holes.
  */
 
 import React from 'react';
-import { Line } from 'react-konva';
+import { Circle, Rect } from 'react-konva';
 import type { TableConfig } from '../../app/state/schema';
+import { gridSpacingMm } from '../../app/state/snapToGrid';
 
 interface GridOverlayProps {
   config: TableConfig;
@@ -12,43 +13,43 @@ interface GridOverlayProps {
 }
 
 export const GridOverlay: React.FC<GridOverlayProps> = ({ config, mmToPx }) => {
-  // Grid spacing in mm: 10mm for metric
-  const gridSpacingMm = config.gridStandard === 'metric' ? 10 : 25.4;
-  const gridSpacingPx = mmToPx(gridSpacingMm);
+  const spacingMm = gridSpacingMm(config.gridStandard);
+  const spacingPx = mmToPx(spacingMm);
+  const tableWidthPx = mmToPx(config.width);
+  const tableHeightPx = mmToPx(config.height);
 
-  const verticalLines: React.ReactNode[] = [];
-  const horizontalLines: React.ReactNode[] = [];
+  const holes: React.ReactNode[] = [];
+  const holeRadius = Math.max(0.6, Math.min(2.4, spacingPx * 0.08));
 
-  // Draw vertical lines
-  for (let x = 0; x < config.width; x += gridSpacingPx) {
-    verticalLines.push(
-      <Line
-        key={`vline-${x}`}
-        points={[x, 0, x, config.height]}
-        stroke="#e0e0e0"
-        strokeWidth={1}
-        opacity={0.5}
-      />
-    );
-  }
-
-  // Draw horizontal lines
-  for (let y = 0; y < config.height; y += gridSpacingPx) {
-    horizontalLines.push(
-      <Line
-        key={`hline-${y}`}
-        points={[0, y, config.width, y]}
-        stroke="#e0e0e0"
-        strokeWidth={1}
-        opacity={0.5}
-      />
-    );
+  for (let xMm = 0; xMm <= config.width + 1e-6; xMm += spacingMm) {
+    for (let yMm = 0; yMm <= config.height + 1e-6; yMm += spacingMm) {
+      holes.push(
+        <Circle
+          key={`hole-${xMm}-${yMm}`}
+          x={mmToPx(xMm)}
+          y={mmToPx(yMm)}
+          radius={holeRadius}
+          fill="rgba(58, 66, 74, 0.45)"
+          listening={false}
+        />
+      );
+    }
   }
 
   return (
     <>
-      {verticalLines}
-      {horizontalLines}
+      <Rect
+        x={0}
+        y={0}
+        width={tableWidthPx}
+        height={tableHeightPx}
+        fill="#f1f3f5"
+        stroke="#8a939c"
+        strokeWidth={1.5}
+        cornerRadius={2}
+        listening={false}
+      />
+      {holes}
     </>
   );
 };

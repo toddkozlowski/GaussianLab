@@ -11,21 +11,25 @@ interface LensRendererProps {
   component: LensThinComponent;
   mmToPx: (mm: number) => number;
   onDragEnd: (componentId: string, newPos: Point2d) => void;
+  onSelect: (componentId: string) => void;
   isDraggable: boolean;
+  isSelected: boolean;
 }
 
 export const LensRenderer: React.FC<LensRendererProps> = ({
   component,
   mmToPx,
   onDragEnd,
+  onSelect,
   isDraggable,
+  isSelected,
 }) => {
   const rectRef = useRef<Konva.Rect>(null);
 
   const x = mmToPx(component.position.x);
   const y = mmToPx(component.position.y);
-  const width = mmToPx(2); // 2mm width
-  const height = mmToPx(6); // 6mm height
+  const width = mmToPx(5); // 5mm width
+  const height = mmToPx(24); // ~grid-spacing height
 
   const handleDragEnd = (e: Konva.KonvaEventObject<DragEvent>) => {
     const newX = (e.target.x() + width / 2) / mmToPx(1);
@@ -42,10 +46,12 @@ export const LensRenderer: React.FC<LensRendererProps> = ({
         width={width}
         height={height}
         fill={component.focalLength > 0 ? '#7ED321' : '#F5A623'}
-        stroke="#2E7D32"
-        strokeWidth={2}
+        stroke={isSelected ? '#1f6feb' : '#2E7D32'}
+        strokeWidth={isSelected ? 3 : 2}
         draggable={isDraggable}
         onDragEnd={handleDragEnd}
+        onClick={() => onSelect(component.id)}
+        onTap={() => onSelect(component.id)}
         cursor={isDraggable ? 'grab' : 'default'}
       />
       <Text

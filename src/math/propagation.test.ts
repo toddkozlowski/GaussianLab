@@ -85,6 +85,8 @@ describe('Propagation Engine', () => {
             distance: 0, // Lens at z=0
             abcdMatrix: { A: 1, B: 0, C: -1 / focalLength, D: 1 },
             componentId: 'lens1',
+            componentKind: 'lens_thin',
+            lensFocalLengthMm: focalLength,
           },
         ],
         componentZMap: { lens1: 0 },
@@ -130,6 +132,156 @@ describe('Propagation Engine', () => {
       expect(Math.sqrt(result.qFinal.re ** 2 + result.qFinal.im ** 2)).toBeGreaterThan(
         Math.sqrt(q0.re ** 2 + q0.im ** 2)
       );
+    });
+
+    it('does not retroactively change upstream profile before lens', () => {
+      const q0 = { re: 0, im: 10 };
+
+      const freeSpaceOnly: PropagationEngineInput = {
+        q0,
+        wavelengthMetres: WAVELENGTH_M,
+        segments: [
+          {
+            distance: 100,
+            abcdMatrix: { A: 1, B: 100, C: 0, D: 1 },
+            componentId: null,
+          },
+        ],
+        componentZMap: {},
+      };
+
+      const withLensAfter100mm: PropagationEngineInput = {
+        q0,
+        wavelengthMetres: WAVELENGTH_M,
+        segments: [
+          {
+            distance: 100,
+            abcdMatrix: { A: 1, B: 100, C: 0, D: 1 },
+            componentId: 'L1',
+            componentKind: 'lens_thin',
+            lensFocalLengthMm: 75,
+          },
+          {
+            distance: 100,
+            abcdMatrix: { A: 1, B: 100, C: 0, D: 1 },
+            componentId: null,
+          },
+        ],
+        componentZMap: { L1: 100 },
+      };
+
+      const baseline = engine.propagateBeam(freeSpaceOnly);
+      const withLens = engine.propagateBeam(withLensAfter100mm);
+
+      const baselineAt50 = baseline.profile.find((p) => Math.abs(p.z - 50) < 1e-6);
+      const withLensAt50 = withLens.profile.find((p) => Math.abs(p.z - 50) < 1e-6);
+
+      expect(baselineAt50).toBeDefined();
+      expect(withLensAt50).toBeDefined();
+      expect(withLensAt50!.w).toBeCloseTo(baselineAt50!.w, 9);
+    });
+
+    it('keeps beam radius continuous across a thin lens encounter', () => {
+      const q0 = { re: 0, im: 10 };
+      const input: PropagationEngineInput = {
+        q0,
+        wavelengthMetres: WAVELENGTH_M,
+        segments: [
+          {
+            distance: 100,
+            abcdMatrix: { A: 1, B: 100, C: 0, D: 1 },
+            componentId: 'L1',
+            componentKind: 'lens_thin',
+            lensFocalLengthMm: 75,
+          },
+          {
+            distance: 50,
+            abcdMatrix: { A: 1, B: 50, C: 0, D: 1 },
+            componentId: null,
+          },
+        ],
+        componentZMap: { L1: 100 },
+      };
+
+      const result = engine.propagateBeam(input);
+      const beforeLens = result.profile.find((p) => Math.abs(p.z - 100) < 1e-6);
+      const justAfterLens = result.profile.find((p) => Math.abs(p.z - 105) < 1e-6);
+
+      expect(beforeLens).toBeDefined();
+      expect(justAfterLens).toBeDefined();
+      expect(Math.abs(justAfterLens!.w - beforeLens!.w)).toBeLessThan(0.02);
+    });
+  });
+
+  describe('cavity checkpoint mode filtering', () => {
+    it('switches to cavity eigenmode when overlap is above threshold', () => {
+      const q0 = { re: 0, im: 10 };
+      const input: PropagationEngineInput = {
+        q0,
+        wavelengthMetres: WAVELENGTH_M,
+        segments: [
+          {
+            distance: 100,
+            abcdMatrix: { A: 1, B: 100, C: 0, D: 1 },
+            componentId: 'FP1',
+            componentKind: 'cavity_fp',
+            cavityEigenmode: {
+              waistRadius: 0.06,
+              waistPositionFromM1: 0,
+              stabilityProduct: 0.5,
+              isStable: true,
+            },
+            cavityLengthMm: 50,
+            cavityCouplingThreshold: 0,
+          },
+          {
+            distance: 25,
+            abcdMatrix: { A: 1, B: 25, C: 0, D: 1 },
+            componentId: null,
+          },
+        ],
+        componentZMap: { FP1: 100 },
+      };
+
+      const result = engine.propagateBeam(input);
+      const cavityQ = result.qAtComponent.FP1;
+      expect(cavityQ).toBeDefined();
+      expect(cavityQ.im).toBeGreaterThan(0);
+      expect(result.profile[result.profile.length - 1].z).toBeCloseTo(125, 6);
+    });
+
+    it('terminates downstream profile when cavity coupling is below threshold', () => {
+      const q0 = { re: 0, im: 0.2 };
+      const input: PropagationEngineInput = {
+        q0,
+        wavelengthMetres: WAVELENGTH_M,
+        segments: [
+          {
+            distance: 100,
+            abcdMatrix: { A: 1, B: 100, C: 0, D: 1 },
+            componentId: 'FP1',
+            componentKind: 'cavity_fp',
+            cavityEigenmode: {
+              waistRadius: 1,
+              waistPositionFromM1: 0,
+              stabilityProduct: 0.5,
+              isStable: true,
+            },
+            cavityLengthMm: 50,
+            cavityCouplingThreshold: 0.1,
+          },
+          {
+            distance: 25,
+            abcdMatrix: { A: 1, B: 25, C: 0, D: 1 },
+            componentId: null,
+          },
+        ],
+        componentZMap: { FP1: 100 },
+      };
+
+      const result = engine.propagateBeam(input);
+      const lastZ = result.profile[result.profile.length - 1].z;
+      expect(lastZ).toBeCloseTo(100, 6);
     });
   });
 

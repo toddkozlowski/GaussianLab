@@ -11,24 +11,28 @@ interface MirrorRendererProps {
   component: FlatMirrorComponent;
   mmToPx: (mm: number) => number;
   onDragEnd: (componentId: string, newPos: Point2d) => void;
+  onSelect: (componentId: string) => void;
   isDraggable: boolean;
+  isSelected: boolean;
 }
 
 export const MirrorRenderer: React.FC<MirrorRendererProps> = ({
   component,
   mmToPx,
   onDragEnd,
+  onSelect,
   isDraggable,
+  isSelected,
 }) => {
   const lineRef = useRef<Konva.Line>(null);
   const groupRef = useRef<Konva.Group>(null);
 
   const x = mmToPx(component.position.x);
   const y = mmToPx(component.position.y);
-  const mirrorLength = mmToPx(8); // 8mm display length
+  const mirrorLength = mmToPx(24); // ~grid-spacing display length
 
   // Calculate endpoints based on orientation (45, 135, 225, 315)
-  const angleRad = (component.orientation * Math.PI) / 180;
+  const angleRad = (-component.orientation * Math.PI) / 180;
   const dx = Math.cos(angleRad) * (mirrorLength / 2);
   const dy = Math.sin(angleRad) * (mirrorLength / 2);
 
@@ -47,6 +51,8 @@ export const MirrorRenderer: React.FC<MirrorRendererProps> = ({
       y={y}
       draggable={isDraggable}
       onDragEnd={handleDragEnd}
+      onClick={() => onSelect(component.id)}
+      onTap={() => onSelect(component.id)}
       onMouseEnter={() => {
         if (isDraggable) document.body.style.cursor = 'grab';
       }}
@@ -57,8 +63,8 @@ export const MirrorRenderer: React.FC<MirrorRendererProps> = ({
       <Line
         ref={lineRef}
         points={[-dx, -dy, dx, dy]}
-        stroke="#4A90E2"
-        strokeWidth={3}
+        stroke={isSelected ? '#1f6feb' : '#4A90E2'}
+        strokeWidth={isSelected ? 4 : 3}
         lineCap="round"
       />
       <Text

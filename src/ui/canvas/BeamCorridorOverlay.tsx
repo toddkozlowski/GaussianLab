@@ -11,6 +11,7 @@ interface BeamCorridorOverlayProps {
   source: SourceComponent | null;
   propagationResult: PropagationResult | null;
   mmToPx: (mm: number) => number;
+  hoveredZMm?: number | null;
 }
 
 function sourceBeamRadiusMm(source: SourceComponent | null): number {
@@ -49,6 +50,7 @@ export const BeamCorridorOverlay: React.FC<BeamCorridorOverlayProps> = ({
   source,
   propagationResult,
   mmToPx,
+  hoveredZMm,
 }) => {
   if (!beamPath || beamPath.segments.length === 0 || !beamPath.isValid) {
     return null;
@@ -110,6 +112,39 @@ export const BeamCorridorOverlay: React.FC<BeamCorridorOverlayProps> = ({
           />
         );
       })}
+
+      {typeof hoveredZMm === 'number' && (() => {
+        const hoveredPoint = pointAlongPathAtZ(beamPath, hoveredZMm);
+        if (!hoveredPoint) {
+          return null;
+        }
+
+        return (
+          <Circle
+            x={mmToPx(hoveredPoint.x)}
+            y={mmToPx(hoveredPoint.y)}
+            radius={5}
+            fill="#2d9bf0"
+            stroke="#ffffff"
+            strokeWidth={1.5}
+            listening={false}
+          />
+        );
+      })()}
     </>
   );
 };
+
+function pointAlongPathAtZ(beamPath: BeamPath, zMm: number): { x: number; y: number } | null {
+  const segment = beamPath.segments.find((candidate) => zMm >= candidate.zStart && zMm <= candidate.zEnd);
+  if (!segment) {
+    return null;
+  }
+
+  const length = Math.max(1e-9, segment.zEnd - segment.zStart);
+  const t = Math.max(0, Math.min(1, (zMm - segment.zStart) / length));
+  return {
+    x: segment.start.x + (segment.end.x - segment.start.x) * t,
+    y: segment.start.y + (segment.end.y - segment.start.y) * t,
+  };
+}

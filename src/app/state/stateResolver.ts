@@ -136,39 +136,23 @@ function beamPathToSegments(state: AppState, beamPath: BeamPath): any[] {
     const terminatedId = segment.terminatedByComponentId;
     const terminated = terminatedId ? state.components[terminatedId] : null;
 
-    // Base matrix is free-space propagation in persisted units (mm).
-    let matrix = {
+    // Segment matrix is free-space only. Component transforms are applied at boundaries.
+    const matrix = {
       A: 1,
       B: distance,
       C: 0,
       D: 1,
     };
 
-    // Apply thin-lens power when the segment terminates on a lens.
-    if (terminated && terminated.kind === 'lens_thin') {
-      const f = terminated.focalLength;
-      if (Math.abs(f) > 1e-9) {
-        const lens = {
-          A: 1,
-          B: 0,
-          C: -1 / f,
-          D: 1,
-        };
-
-        // Compose lens * free-space (free-space first, then lens).
-        matrix = {
-          A: lens.A * matrix.A + lens.B * matrix.C,
-          B: lens.A * matrix.B + lens.B * matrix.D,
-          C: lens.C * matrix.A + lens.D * matrix.C,
-          D: lens.C * matrix.B + lens.D * matrix.D,
-        };
-      }
-    }
-
     return {
       distance,
       abcdMatrix: matrix,
       componentId: terminatedId,
+      componentKind: terminated?.kind ?? null,
+      lensFocalLengthMm: terminated?.kind === 'lens_thin' ? terminated.focalLength : undefined,
+      cavityEigenmode: terminated?.kind === 'cavity_fp' ? terminated.eigenmode : undefined,
+      cavityLengthMm: terminated?.kind === 'cavity_fp' ? terminated.length : undefined,
+      cavityCouplingThreshold: terminated?.kind === 'cavity_fp' ? 0.1 : undefined,
     };
   });
 }

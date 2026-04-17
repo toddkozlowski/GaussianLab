@@ -11,21 +11,25 @@ interface CavityRendererProps {
   component: CavityFPComponent;
   mmToPx: (mm: number) => number;
   onDragEnd: (componentId: string, newPos: Point2d) => void;
+  onSelect: (componentId: string) => void;
   isDraggable: boolean;
+  isSelected: boolean;
 }
 
 export const CavityRenderer: React.FC<CavityRendererProps> = ({
   component,
   mmToPx,
   onDragEnd,
+  onSelect,
   isDraggable,
+  isSelected,
 }) => {
   const groupRef = useRef<Konva.Group>(null);
 
   const x = mmToPx(component.position.x);
   const y = mmToPx(component.position.y);
   const cavityLengthPx = mmToPx(Math.min(component.length, 30)); // Cap display length
-  const mirrorHeight = mmToPx(8);
+  const mirrorHeight = mmToPx(24);
 
   const handleDragEnd = (e: Konva.KonvaEventObject<DragEvent>) => {
     if (groupRef.current) {
@@ -45,6 +49,8 @@ export const CavityRenderer: React.FC<CavityRendererProps> = ({
       y={y}
       draggable={isDraggable}
       onDragEnd={handleDragEnd}
+      onClick={() => onSelect(component.id)}
+      onTap={() => onSelect(component.id)}
       onMouseEnter={() => {
         if (isDraggable) document.body.style.cursor = 'grab';
       }}
@@ -59,8 +65,8 @@ export const CavityRenderer: React.FC<CavityRendererProps> = ({
         width={mmToPx(1)}
         height={mirrorHeight}
         fill={fillColor}
-        stroke="#333"
-        strokeWidth={2}
+        stroke={isSelected ? '#1f6feb' : '#333'}
+        strokeWidth={isSelected ? 3 : 2}
       />
 
       {/* Cavity space */}
@@ -77,8 +83,8 @@ export const CavityRenderer: React.FC<CavityRendererProps> = ({
         width={mmToPx(1)}
         height={mirrorHeight}
         fill={fillColor}
-        stroke="#333"
-        strokeWidth={2}
+        stroke={isSelected ? '#1f6feb' : '#333'}
+        strokeWidth={isSelected ? 3 : 2}
       />
 
       {/* Label */}

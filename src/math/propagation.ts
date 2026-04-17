@@ -6,21 +6,17 @@
  */
 
 import {
-  qFromWaist,
-  waistFromQ,
   propagateQ,
-  beamRadiusAtZ,
   rayleighRange,
+  waistFromQ,
 } from './qParameter';
 import { type Complex } from './complex';
-import { createABCD, multiplyABCD, type ABCDMatrix as MathABCDMatrix } from './abcd';
 import type {
   PropagationEngine,
   PropagationEngineInput,
-  PropagationSegment,
-  ABCDMatrix,
 } from '../app/state/types/Layer0Interfaces';
 import type { PropagationResult, PropagationWaist, ComplexNumber } from '../app/state/schema';
+import { calculateModeOverlap } from './overlap';
 
 /**
  * Propagation engine: traces Gaussian beam through optical system
@@ -30,7 +26,7 @@ export class ConcreteBeamPropagationEngine implements PropagationEngine {
    * Propagate beam through segments and return profile + waists
    */
   propagateBeam(input: PropagationEngineInput): PropagationResult {
-    const { q0, wavelengthMetres, segments, componentZMap } = input;
+    const { q0, wavelengthMetres, segments } = input;
 
     // Convert input q (in mm units) to SI for calculation
     // Note: q0 is in mm per schema convention; convert to metres
@@ -39,64 +35,101 @@ export class ConcreteBeamPropagationEngine implements PropagationEngine {
       im: q0.im / 1000, // mm to metres
     };
 
-    let q_current = q0_SI;
+    let qCurrent = q0_SI;
     let z_current = 0; // Absolute position in system
 
     const profile: Array<{ z: number; w: number }> = []; // in mm
     const waists: PropagationWaist[] = [];
     const qAtComponent: Record<string, ComplexNumber> = {};
 
-    // Propagate through each segment
+    // Propagate through each segment. Each segment models free-space travel only.
+    // Component transforms happen at the segment boundary after sampling.
     for (const segment of segments) {
-      const { distance, abcdMatrix: abcdMM, componentId } = segment;
+      const { distance, componentId } = segment;
+      const distanceM = distance / 1000;
 
-      // Convert ABCD matrix from mm to SI (metres)
-      const abcdSI = convertABCDtoSI(abcdMM);
-
-      // Apply ABCD transformation
-      q_current = propagateQ(q_current, abcdSI);
-
-      // Sample profile along this segment at regular intervals
-      const { waistRadius, waistPosition } = waistFromQ(q_current, wavelengthMetres);
-      const zR = rayleighRange(waistRadius, wavelengthMetres);
-
-      // Sample points along segment (every 5mm or so)
-      const sampleCount = Math.max(2, Math.ceil((distance / 1000) / 0.005)); // Convert mm to metres, 5mm spacing
-      for (let i = 0; i <= sampleCount; i++) {
-        const frac = i / sampleCount;
-        const z_local = frac * (distance / 1000); // metres
-        const w_local = beamRadiusAtZ(waistRadius, zR, z_local);
-
-        // Check if this is close to waist
-        if (i === 0 && frac === 0 && Math.abs(z_local) < 1e-6) {
-          // Start of segment
+      const segmentWaistAt = -qCurrent.re;
+      if (segmentWaistAt >= 0 && segmentWaistAt <= distanceM) {
+        const localWaistRadius = Math.sqrt((wavelengthMetres * qCurrent.im) / Math.PI);
+        if (Number.isFinite(localWaistRadius) && localWaistRadius > 0) {
+          waists.push({
+            z: z_current + segmentWaistAt,
+            w: localWaistRadius,
+            componentId,
+          });
         }
-        if (Math.abs(z_local - waistPosition) < 0.0001) {
-          // Near waist position
-          if (waists.length === 0 || Math.abs(waists[waists.length - 1].z - (z_current + z_local)) > 0.001) {
-            waists.push({
-              z: z_current + z_local, // absolute position in metres
-              w: w_local,
-              componentId,
-            });
-          }
-        }
+      }
+
+      const sampleCount = Math.max(1, Math.ceil(distanceM / 0.005));
+      for (let i = 0; i <= sampleCount; i += 1) {
+        const zLocal = (distanceM * i) / sampleCount;
+        const qLocal: Complex = {
+          re: qCurrent.re + zLocal,
+          im: qCurrent.im,
+        };
 
         profile.push({
-          z: (z_current + z_local) * 1000, // Convert back to mm for output
-          w: w_local * 1000, // Convert back to mm for output
+          z: (z_current + zLocal) * 1000,
+          w: beamRadiusFromQ(qLocal, wavelengthMetres) * 1000,
         });
       }
 
-      // Record q at component if this segment terminates at a component
+      const qAtBoundary: Complex = {
+        re: qCurrent.re + distanceM,
+        im: qCurrent.im,
+      };
+
+      let qAfterBoundary = qAtBoundary;
+      let terminateAfterBoundary = false;
+
+      if (segment.componentKind === 'lens_thin') {
+        const focalLengthMm = segment.lensFocalLengthMm;
+        if (typeof focalLengthMm === 'number' && Math.abs(focalLengthMm) > 1e-9) {
+          qAfterBoundary = propagateQ(qAtBoundary, {
+            A: 1,
+            B: 0,
+            C: -1000 / focalLengthMm,
+            D: 1,
+          });
+        }
+      } else if (segment.componentKind === 'cavity_fp' && segment.cavityEigenmode?.isStable) {
+        const cavityQAtInput = cavityEigenmodeAtInput(segment.cavityEigenmode, wavelengthMetres);
+        const beamAtInput = beamFromQ(qAtBoundary, wavelengthMetres);
+        const cavityAtInput = beamFromQ(cavityQAtInput, wavelengthMetres);
+
+        const overlap = calculateModeOverlap(
+          beamAtInput.radius,
+          beamAtInput.waistPosition,
+          cavityAtInput.radius,
+          cavityAtInput.waistPosition,
+          wavelengthMetres
+        );
+
+        const threshold = segment.cavityCouplingThreshold ?? 0.1;
+        if (overlap >= threshold) {
+          const cavityLengthM = Math.max(0, (segment.cavityLengthMm ?? 0) / 1000);
+          qAfterBoundary = {
+            re: cavityQAtInput.re + cavityLengthM,
+            im: cavityQAtInput.im,
+          };
+        } else {
+          terminateAfterBoundary = true;
+        }
+      }
+
       if (componentId) {
         qAtComponent[componentId] = {
-          re: q_current.re * 1000, // Convert back to mm
-          im: q_current.im * 1000, // Convert back to mm
+          re: qAfterBoundary.re * 1000,
+          im: qAfterBoundary.im * 1000,
         };
       }
 
-      z_current += distance / 1000; // Update absolute position (mm to metres)
+      qCurrent = qAfterBoundary;
+      z_current += distanceM;
+
+      if (terminateAfterBoundary) {
+        break;
+      }
     }
 
     // Ensure unique waists
@@ -114,23 +147,45 @@ export class ConcreteBeamPropagationEngine implements PropagationEngine {
       waists: uniqueWaists,
       qAtComponent,
       qFinal: {
-        re: q_current.re * 1000, // Convert back to mm
-        im: q_current.im * 1000, // Convert back to mm
+        re: qCurrent.re * 1000,
+        im: qCurrent.im * 1000,
       },
     };
   }
 }
 
-/**
- * Convert ABCD matrix from mm (persisted units) to SI (metres)
- * B is multiplied by 1e-3 (mm to m)
- * C is divided by 1e-3 (1/mm to 1/m)
- */
-function convertABCDtoSI(abcdMM: ABCDMatrix): MathABCDMatrix {
+function beamRadiusFromQ(q: Complex, wavelengthMetres: number): number {
+  const denom = q.re * q.re + q.im * q.im;
+  if (denom <= 0 || q.im <= 0) {
+    return 1e-6;
+  }
+
+  const invQIm = -q.im / denom;
+  const wSq = -wavelengthMetres / (Math.PI * invQIm);
+  if (!Number.isFinite(wSq) || wSq <= 0) {
+    return 1e-6;
+  }
+
+  return Math.sqrt(wSq);
+}
+
+function beamFromQ(q: Complex, wavelengthMetres: number): { radius: number; waistPosition: number } {
+  const { waistPosition } = waistFromQ(q, wavelengthMetres);
   return {
-    A: abcdMM.A,
-    B: abcdMM.B / 1000, // mm to metres
-    C: abcdMM.C * 1000, // 1/mm to 1/metres
-    D: abcdMM.D,
+    radius: beamRadiusFromQ(q, wavelengthMetres),
+    waistPosition,
+  };
+}
+
+function cavityEigenmodeAtInput(
+  eigenmode: { waistRadius: number; waistPositionFromM1: number },
+  wavelengthMetres: number
+): Complex {
+  const cavityWaistRadiusM = Math.max(1e-9, eigenmode.waistRadius / 1000);
+  const cavityWaistPositionM = eigenmode.waistPositionFromM1 / 1000;
+  const zR = rayleighRange(cavityWaistRadiusM, wavelengthMetres);
+  return {
+    re: -cavityWaistPositionM,
+    im: zR,
   };
 }

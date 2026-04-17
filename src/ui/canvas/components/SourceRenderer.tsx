@@ -11,20 +11,24 @@ interface SourceRendererProps {
   component: SourceComponent;
   mmToPx: (mm: number) => number;
   onDragEnd: (componentId: string, newPos: Point2d) => void;
+  onSelect: (componentId: string) => void;
   isDraggable: boolean;
+  isSelected: boolean;
 }
 
 export const SourceRenderer: React.FC<SourceRendererProps> = ({
   component,
   mmToPx,
   onDragEnd,
+  onSelect,
   isDraggable,
+  isSelected,
 }) => {
   const circleRef = useRef<Konva.Circle>(null);
 
   const x = mmToPx(component.position.x);
   const y = mmToPx(component.position.y);
-  const radius = mmToPx(3); // 3mm display radius
+  const radius = mmToPx(6); // 6mm display radius
 
   const handleDragEnd = (e: Konva.KonvaEventObject<DragEvent>) => {
     const newX = e.target.x() / mmToPx(1);
@@ -40,10 +44,12 @@ export const SourceRenderer: React.FC<SourceRendererProps> = ({
         y={y}
         radius={radius}
         fill="#FF6B6B"
-        stroke="#8B0000"
-        strokeWidth={2}
+        stroke={isSelected ? '#1f6feb' : '#8B0000'}
+        strokeWidth={isSelected ? 3 : 2}
         draggable={isDraggable}
         onDragEnd={handleDragEnd}
+        onClick={() => onSelect(component.id)}
+        onTap={() => onSelect(component.id)}
         cursor={isDraggable ? 'grab' : 'default'}
       />
       <Text

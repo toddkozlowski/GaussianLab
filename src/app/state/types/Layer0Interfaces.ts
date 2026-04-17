@@ -12,6 +12,7 @@
 import type { ComplexNumber, PropagationResult, CavityEigenmode } from '../schema';
 import type { BeamPath } from '../schema';
 import type { CavityFPComponent } from '../schema';
+import type { ComponentKind } from '../schema';
 
 /**
  * ABCD matrix representation for a single optical element.
@@ -37,6 +38,21 @@ export interface PropagationSegment {
 
   /** Component ID responsible for this segment, if any. */
   componentId: string | null;
+
+  /** Kind of component encountered at the end of the segment. */
+  componentKind?: ComponentKind | null;
+
+  /** Thin lens focal length when componentKind is lens_thin. */
+  lensFocalLengthMm?: number;
+
+  /** Cavity eigenmode at M1 when componentKind is cavity_fp. */
+  cavityEigenmode?: CavityEigenmode | null;
+
+  /** Physical cavity length used to project cavity output mode. */
+  cavityLengthMm?: number;
+
+  /** Minimum overlap needed to treat cavity as coupled mode output. */
+  cavityCouplingThreshold?: number;
 }
 
 /**
