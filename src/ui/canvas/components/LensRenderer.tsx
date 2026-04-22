@@ -5,7 +5,7 @@
 import React, { useRef } from 'react';
 import { Rect, Text } from 'react-konva';
 import Konva from 'konva';
-import type { LensThinComponent, Point2d } from '../../../app/state/schema';
+import type { CardinalDirection, LensThinComponent, Point2d } from '../../../app/state/schema';
 
 interface LensRendererProps {
   component: LensThinComponent;
@@ -14,6 +14,8 @@ interface LensRendererProps {
   onSelect: (componentId: string) => void;
   isDraggable: boolean;
   isSelected: boolean;
+  axisDirection: CardinalDirection | null;
+  getSnappedDragPositionPx: (component: LensThinComponent, rawPx: Point2d) => Point2d;
 }
 
 export const LensRenderer: React.FC<LensRendererProps> = ({
@@ -23,13 +25,16 @@ export const LensRenderer: React.FC<LensRendererProps> = ({
   onSelect,
   isDraggable,
   isSelected,
+  axisDirection,
+  getSnappedDragPositionPx,
 }) => {
   const rectRef = useRef<Konva.Rect>(null);
 
   const x = mmToPx(component.position.x);
   const y = mmToPx(component.position.y);
-  const width = mmToPx(5); // 5mm width
-  const height = mmToPx(24); // ~grid-spacing height
+  const vertical = axisDirection === null || axisDirection === 'right' || axisDirection === 'left';
+  const width = mmToPx(vertical ? 5 : 24);
+  const height = mmToPx(vertical ? 24 : 5);
 
   const handleDragEnd = (e: Konva.KonvaEventObject<DragEvent>) => {
     const newX = (e.target.x() + width / 2) / mmToPx(1);
@@ -49,6 +54,16 @@ export const LensRenderer: React.FC<LensRendererProps> = ({
         stroke={isSelected ? '#1f6feb' : '#2E7D32'}
         strokeWidth={isSelected ? 3 : 2}
         draggable={isDraggable}
+        dragBoundFunc={(pos) => {
+          const snapped = getSnappedDragPositionPx(component, {
+            x: pos.x + width / 2,
+            y: pos.y + height / 2,
+          });
+          return {
+            x: snapped.x - width / 2,
+            y: snapped.y - height / 2,
+          };
+        }}
         onDragEnd={handleDragEnd}
         onClick={() => onSelect(component.id)}
         onTap={() => onSelect(component.id)}

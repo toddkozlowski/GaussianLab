@@ -26,6 +26,11 @@ import { CavityRenderer } from './components/CavityRenderer';
 import { GridOverlay } from './GridOverlay';
 import { BeamCorridorOverlay } from './BeamCorridorOverlay';
 import { snapPointToGrid } from '../../app/state/snapToGrid';
+import lockIcon from '../../../icons/lock.svg';
+import lockOpenIcon from '../../../icons/lock-open.svg';
+import rotateCcwIcon from '../../../icons/rotate-ccw.svg';
+import rotateCwIcon from '../../../icons/rotate-cw.svg';
+import trashIcon from '../../../icons/trash-2.svg';
 
 interface CanvasProps {
   config: TableConfig;
@@ -46,6 +51,7 @@ export const Canvas: React.FC<CanvasProps> = ({
   hoveredZMm,
   onHoverZMm,
 }) => {
+  const selectionCardWidth = 224;
   const stageRef = useRef<Konva.Stage>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const { state, dispatch } = useAppStore();
@@ -53,6 +59,10 @@ export const Canvas: React.FC<CanvasProps> = ({
   const source = sourceId ? components[sourceId] : null;
   const sourceComponent = source && source.kind === 'source' ? (source as SourceComponent) : null;
   const selected = state.selectedComponentId ? state.components[state.selectedComponentId] : null;
+  const hoveredProfilePoint = React.useMemo(
+    () => (hoveredZMm === null ? null : nearestProfilePoint(propagationResult?.profile ?? [], hoveredZMm)),
+    [hoveredZMm, propagationResult]
+  );
 
   const isJsdomTestEnv =
     typeof window !== 'undefined' &&
@@ -168,6 +178,23 @@ export const Canvas: React.FC<CanvasProps> = ({
     });
   };
 
+  const getSnappedDragPositionPx = React.useCallback(
+    (component: OpticalComponent, rawPx: Point2d): Point2d => {
+      const widthPx = viewportSize.width - tablePadding * 2;
+      const heightPx = viewportSize.height - tablePadding * 2;
+      const pointMm = {
+        x: (rawPx.x - tablePadding) / tableScale,
+        y: (rawPx.y - tablePadding) / tableScale,
+      };
+      const normalized = normalizePosition(component, pointMm);
+      return {
+        x: Math.max(tablePadding, Math.min(tablePadding + widthPx, tablePadding + mmToPx(normalized.x))),
+        y: Math.max(tablePadding, Math.min(tablePadding + heightPx, tablePadding + mmToPx(normalized.y))),
+      };
+    },
+    [mmToPx, normalizePosition, tablePadding, tableScale, viewportSize.height, viewportSize.width]
+  );
+
   const selectComponent = (componentId: string) => {
     dispatch({ type: 'SET_SELECTED_COMPONENT', payload: { componentId } });
   };
@@ -224,6 +251,28 @@ export const Canvas: React.FC<CanvasProps> = ({
     }
   };
 
+  const toggleLockSelected = () => {
+    if (!selected) {
+      return;
+    }
+
+    const locked = !selected.locked;
+    dispatch({ type: 'LOCK_COMPONENT', payload: { id: selected.id, locked } });
+    if (selected.kind === 'lens_thin') {
+      dispatch({
+        type: 'UPDATE_COMPONENT',
+        payload: { id: selected.id, updates: { optimiserCanMove: !locked } },
+      });
+    }
+  };
+
+  const deleteSelected = () => {
+    if (!selected) {
+      return;
+    }
+    dispatch({ type: 'REMOVE_COMPONENT', payload: { id: selected.id } });
+  };
+
   if (isJsdomTestEnv) {
     return (
       <div style={{ border: '1px solid #ccc', overflow: 'hidden', height: '100%' }}>
@@ -233,10 +282,16 @@ export const Canvas: React.FC<CanvasProps> = ({
   }
 
   const selectedOverlayPos = selected
-    ? {
-        left: tablePadding + mmToPx(selected.position.x) + 12,
-        top: tablePadding + mmToPx(selected.position.y) - 12,
-      }
+    ? getSelectionPopoverPosition({
+        componentPx: {
+          x: tablePadding + mmToPx(selected.position.x),
+          y: tablePadding + mmToPx(selected.position.y),
+        },
+        viewportSize,
+        cardWidth: selectionCardWidth,
+        cardHeight: getSelectionCardHeight(selected.kind),
+        marginPx: 12,
+      })
     : null;
 
   return (
@@ -328,6 +383,8 @@ export const Canvas: React.FC<CanvasProps> = ({
                     onSelect={selectComponent}
                     isDraggable={!component.locked}
                     isSelected={state.selectedComponentId === component.id}
+                    axisDirection={lensAxisDirection(beamPath, component.id, component.position)}
+                    getSnappedDragPositionPx={getSnappedDragPositionPx}
                   />
                 )}
                 {component.kind === 'cavity_fp' && (
@@ -348,17 +405,64 @@ export const Canvas: React.FC<CanvasProps> = ({
 
       {selected && selectedOverlayPos && (
         <div className="canvas-selection-popover" style={{ left: selectedOverlayPos.left, top: selectedOverlayPos.top }}>
-          <div className="canvas-selection-header">{selected.label}</div>
-          {(selected.kind === 'mirror_flat' || selected.kind === 'source' || selected.kind === 'cavity_fp') && (
-            <div className="canvas-selection-rotate-row">
-              <button type="button" onClick={() => rotateSelected(false)}>
-                Rotate -90
+          <div className="canvas-selection-topbar">
+            <div className="canvas-selection-header">{selected.label}</div>
+            <div className="canvas-selection-topbar-actions">
+              <button
+                type="button"
+                className="icon-button"
+                aria-label={selected.locked ? 'Unlock component' : 'Lock component'}
+                onClick={toggleLockSelected}
+              >
+                <img className="icon-glyph" src={selected.locked ? lockIcon : lockOpenIcon} alt="" />
               </button>
-              <button type="button" onClick={() => rotateSelected(true)}>
-                Rotate +90
+              <button type="button" className="icon-button danger-button" aria-label="Delete component" onClick={deleteSelected}>
+                <img className="icon-glyph" src={trashIcon} alt="" />
               </button>
             </div>
-          )}
+          </div>
+          <label>
+            Label
+            <input
+              value={selected.label}
+              onChange={(event) =>
+                dispatch({
+                  type: 'UPDATE_COMPONENT',
+                  payload: { id: selected.id, updates: { label: event.target.value } },
+                })
+              }
+            />
+          </label>
+          <div className="canvas-selection-grid">
+            <label>
+              X (mm)
+              <input
+                type="number"
+                value={formatFixed3(selected.position.x)}
+                onChange={(event) => updateCanvasPosition(dispatch, config, selected.id, selected.position, 'x', Number(event.target.value))}
+              />
+            </label>
+            <label>
+              Y (mm)
+              <input
+                type="number"
+                value={formatFixed3(selected.position.y)}
+                onChange={(event) => updateCanvasPosition(dispatch, config, selected.id, selected.position, 'y', Number(event.target.value))}
+              />
+            </label>
+          </div>
+          <div className="canvas-selection-actions">
+            {(selected.kind === 'mirror_flat' || selected.kind === 'source' || selected.kind === 'cavity_fp') && (
+              <>
+                <button type="button" className="icon-button" aria-label="Rotate counterclockwise" onClick={() => rotateSelected(false)}>
+                  <img className="icon-glyph" src={rotateCcwIcon} alt="" />
+                </button>
+                <button type="button" className="icon-button" aria-label="Rotate clockwise" onClick={() => rotateSelected(true)}>
+                  <img className="icon-glyph" src={rotateCwIcon} alt="" />
+                </button>
+              </>
+            )}
+          </div>
 
           {selected.kind === 'source' && (
             <div className="canvas-source-editor">
@@ -387,7 +491,7 @@ export const Canvas: React.FC<CanvasProps> = ({
                 <input
                   type="number"
                   step={0.1}
-                  value={selected.waistOffset}
+                  value={formatFixed3(selected.waistOffset)}
                   onChange={(event) => {
                     const value = Number(event.target.value);
                     if (Number.isFinite(value)) {
@@ -395,7 +499,7 @@ export const Canvas: React.FC<CanvasProps> = ({
                         type: 'UPDATE_COMPONENT',
                         payload: {
                           id: selected.id,
-                          updates: { waistOffset: value },
+                          updates: { waistOffset: round3(value) },
                         },
                       });
                     }
@@ -407,7 +511,7 @@ export const Canvas: React.FC<CanvasProps> = ({
                 <input
                   type="number"
                   step={1}
-                  value={selected.wavelength}
+                  value={formatFixed3(selected.wavelength)}
                   onChange={(event) => {
                     const value = Number(event.target.value);
                     if (Number.isFinite(value)) {
@@ -424,6 +528,98 @@ export const Canvas: React.FC<CanvasProps> = ({
               </label>
             </div>
           )}
+
+          {selected.kind === 'lens_thin' && (
+            <div className="canvas-source-editor">
+              <label>
+                Focal length (mm)
+                <input
+                  type="number"
+                  value={formatFixed3(selected.focalLength)}
+                  onChange={(event) => {
+                    const value = Number(event.target.value);
+                    if (Number.isFinite(value)) {
+                      dispatch({
+                        type: 'UPDATE_COMPONENT',
+                        payload: { id: selected.id, updates: { focalLength: round3(value) } },
+                      });
+                    }
+                  }}
+                />
+              </label>
+            </div>
+          )}
+
+          {selected.kind === 'mirror_flat' && (
+            <div className="canvas-source-editor">
+              <label>
+                Orientation
+                <select
+                  value={selected.orientation}
+                  onChange={(event) =>
+                    dispatch({
+                      type: 'UPDATE_COMPONENT',
+                      payload: {
+                        id: selected.id,
+                        updates: { orientation: Number(event.target.value) as MirrorOrientation },
+                      },
+                    })
+                  }
+                >
+                  <option value={45}>45</option>
+                  <option value={135}>135</option>
+                  <option value={225}>225</option>
+                  <option value={315}>315</option>
+                </select>
+              </label>
+            </div>
+          )}
+
+          {selected.kind === 'cavity_fp' && (
+            <div className="canvas-source-editor">
+              <label>
+                Length (mm)
+                <input
+                  type="number"
+                  value={formatFixed3(selected.length)}
+                  onChange={(event) => {
+                    const value = Number(event.target.value);
+                    if (Number.isFinite(value)) {
+                      dispatch({
+                        type: 'UPDATE_COMPONENT',
+                        payload: { id: selected.id, updates: { length: round3(Math.max(1, value)) } },
+                      });
+                    }
+                  }}
+                />
+              </label>
+              <label>
+                R1 (mm)
+                <input
+                  type="number"
+                  value={Number.isFinite(selected.r1) ? formatFixed3(selected.r1) : ''}
+                  placeholder="Infinity"
+                  onChange={(event) => updateCavityRadius(dispatch, selected.id, 'r1', event.target.value)}
+                />
+              </label>
+              <label>
+                R2 (mm)
+                <input
+                  type="number"
+                  value={Number.isFinite(selected.r2) ? formatFixed3(selected.r2) : ''}
+                  placeholder="Infinity"
+                  onChange={(event) => updateCavityRadius(dispatch, selected.id, 'r2', event.target.value)}
+                />
+              </label>
+            </div>
+          )}
+        </div>
+      )}
+
+      {hoveredProfilePoint && (
+        <div className="canvas-hover-card">
+          <strong>{formatBeamRadius(hoveredProfilePoint.w)}</strong>
+          <span>z = {hoveredProfilePoint.z.toFixed(1)} mm</span>
         </div>
       )}
     </div>
@@ -438,6 +634,140 @@ function distanceToRange(value: number, min: number, max: number): number {
     return value - max;
   }
   return 0;
+}
+
+function nearestProfilePoint(profile: Array<{ z: number; w: number }>, zMm: number) {
+  if (profile.length === 0) {
+    return null;
+  }
+
+  let nearest = profile[0];
+  let nearestDistance = Math.abs(profile[0].z - zMm);
+  for (let i = 1; i < profile.length; i += 1) {
+    const candidate = profile[i];
+    const distance = Math.abs(candidate.z - zMm);
+    if (distance < nearestDistance) {
+      nearest = candidate;
+      nearestDistance = distance;
+    }
+  }
+  return nearest;
+}
+
+function formatBeamRadius(radiusMm: number) {
+  const radiusUm = radiusMm * 1000;
+  if (radiusUm < 1000) {
+    return `w = ${radiusUm.toFixed(1)} um`;
+  }
+  return `w = ${radiusMm.toFixed(4)} mm`;
+}
+
+function lensAxisDirection(beamPath: BeamPath | null, componentId: string, position: Point2d): CardinalDirection | null {
+  if (!beamPath || !beamPath.isValid) {
+    return null;
+  }
+
+  const hitSegment = beamPath.segments.find((segment) => segment.terminatedByComponentId === componentId);
+  if (hitSegment) {
+    return hitSegment.direction;
+  }
+
+  const nearest = nearestZOnPath(beamPath, position);
+  if (!nearest) {
+    return null;
+  }
+
+  const segment = beamPath.segments.find((candidate) => nearest.zMm >= candidate.zStart && nearest.zMm <= candidate.zEnd);
+  return segment?.direction ?? null;
+}
+
+function updateCanvasPosition(
+  dispatch: ReturnType<typeof useAppStore>['dispatch'],
+  config: TableConfig,
+  componentId: string,
+  position: Point2d,
+  axis: 'x' | 'y',
+  value: number
+) {
+  if (!Number.isFinite(value)) {
+    return;
+  }
+
+  dispatch({
+    type: 'UPDATE_COMPONENT',
+    payload: {
+      id: componentId,
+      updates: {
+        position: {
+          ...position,
+          [axis]: round3(Math.max(0, Math.min(axis === 'x' ? config.width : config.height, value))),
+        },
+      },
+    },
+  });
+}
+
+function updateCavityRadius(
+  dispatch: ReturnType<typeof useAppStore>['dispatch'],
+  componentId: string,
+  key: 'r1' | 'r2',
+  rawValue: string
+) {
+  if (rawValue.trim() === '') {
+    dispatch({
+      type: 'UPDATE_COMPONENT',
+      payload: { id: componentId, updates: { [key]: Number.POSITIVE_INFINITY } },
+    });
+    return;
+  }
+
+  const value = Number(rawValue);
+  if (!Number.isFinite(value)) {
+    return;
+  }
+
+  dispatch({
+    type: 'UPDATE_COMPONENT',
+    payload: { id: componentId, updates: { [key]: round3(value) } },
+  });
+}
+
+function formatFixed3(value: number): string {
+  if (!Number.isFinite(value)) {
+    return '';
+  }
+  return value.toFixed(3);
+}
+
+function round3(value: number): number {
+  return Math.round(value * 1000) / 1000;
+}
+
+function getSelectionCardHeight(kind: OpticalComponent['kind']) {
+  if (kind === 'source') return 270;
+  if (kind === 'cavity_fp') return 290;
+  return 220;
+}
+
+function getSelectionPopoverPosition({
+  componentPx,
+  viewportSize,
+  cardWidth,
+  cardHeight,
+  marginPx,
+}: {
+  componentPx: Point2d;
+  viewportSize: { width: number; height: number };
+  cardWidth: number;
+  cardHeight: number;
+  marginPx: number;
+}) {
+  const anchorBelow = componentPx.y < viewportSize.height * 0.5;
+  const unclampedTop = anchorBelow ? componentPx.y + marginPx : componentPx.y - cardHeight - marginPx;
+  return {
+    left: Math.max(marginPx, Math.min(viewportSize.width - cardWidth - marginPx, componentPx.x + 12)),
+    top: Math.max(marginPx, Math.min(viewportSize.height - cardHeight - marginPx, unclampedTop)),
+  };
 }
 
 function nearestZOnPath(

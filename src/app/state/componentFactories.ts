@@ -34,7 +34,7 @@ export function createSourceComponent(
     locked: false,
     label: nextLabel('S', countComponentsByKind(components, 'source')),
     direction: 'right',
-    waistRadius: 0.05,
+    waistRadius: 0.3,
     waistOffset: 0,
     wavelength: 1064,
   };

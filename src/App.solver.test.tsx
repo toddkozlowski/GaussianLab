@@ -6,7 +6,10 @@ describe('Layer 5 solver workflow', () => {
     render(<App />);
 
     // Ensure at least one movable lens exists for optimization.
-    fireEvent.click(screen.getByRole('button', { name: 'Add thin lens' }));
+    fireEvent.click(screen.getByRole('button', { name: '+ Lens' }));
+
+    // Expand mode-matching controls (collapsed by default).
+    fireEvent.click(screen.getByRole('button', { name: 'Expand mode matching' }));
 
     // Configure manual target and run solver.
     fireEvent.click(screen.getByRole('button', { name: 'Use manual target' }));

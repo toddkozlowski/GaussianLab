@@ -8,9 +8,10 @@ const BeamProfileChart = lazy(() => import('../../ui/profile/BeamProfileChart').
 interface ProfilePaneProps {
   hoveredZMm: number | null;
   onHoverZMm: (zMm: number | null) => void;
+  showTargetProfile: boolean;
 }
 
-export function ProfilePane({ hoveredZMm, onHoverZMm }: ProfilePaneProps) {
+export function ProfilePane({ hoveredZMm, onHoverZMm, showTargetProfile }: ProfilePaneProps) {
   const { state } = useAppStore();
   const source = state.sourceId ? state.components[state.sourceId] : null;
   const sourceComponent = source && source.kind === 'source' ? source : null;
@@ -40,6 +41,7 @@ export function ProfilePane({ hoveredZMm, onHoverZMm }: ProfilePaneProps) {
               targetMode={state.targetMode}
               hoveredZMm={hoveredZMm}
               onHoverZMm={onHoverZMm}
+              showTargetProfile={showTargetProfile}
             />
           </Suspense>
         )}

@@ -60,7 +60,7 @@ export class ConcreteBeamPropagationEngine implements PropagationEngine {
         }
       }
 
-      const sampleCount = Math.max(1, Math.ceil(distanceM / 0.005));
+      const sampleCount = Math.max(1, Math.ceil(distanceM / 0.001));
       for (let i = 0; i <= sampleCount; i += 1) {
         const zLocal = (distanceM * i) / sampleCount;
         const qLocal: Complex = {

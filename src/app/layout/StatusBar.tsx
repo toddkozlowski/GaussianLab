@@ -16,17 +16,17 @@ export function StatusBar() {
       : 'Target unset';
 
   const statusItems = [
-    { label: 'Path', value: pathValue },
-    { label: 'Overlap', value: bestOverlap },
-    { label: 'Solver', value: state.optimiser.status },
+    { label: 'P', value: pathValue },
+    { label: 'O', value: bestOverlap },
+    { label: 'S', value: state.optimiser.status },
   ];
 
   return (
-    <section className="status-bar" aria-label="Simulation status">
+    <section className="status-corner" aria-label="Simulation status">
       {statusItems.map((item) => (
-        <div className="status-pill" key={item.label}>
+        <div className="status-chip" key={item.label}>
           <strong>{item.label}</strong>
-          <span>{item.value}</span>
+          <span title={item.value}>{item.value}</span>
         </div>
       ))}
     </section>
