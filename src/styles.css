@@ -220,6 +220,75 @@ button:disabled {
   font-size: 0.76rem;
 }
 
+.profile-panel .panel-header {
+  padding-top: 14px;
+}
+
+.profile-panel-body {
+  padding-top: 10px;
+}
+
+.profile-header-title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.profile-help-popout[open] > div {
+  width: 280px;
+  right: auto;
+  left: 0;
+}
+
+.warning-button {
+  border-color: rgba(173, 135, 16, 0.38);
+  background: linear-gradient(180deg, #fff7de, #ffe7ad);
+}
+
+.profile-overlap-chip {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.95);
+  border: 1px solid rgba(24, 33, 48, 0.14);
+  font-size: 0.76rem;
+}
+
+.profile-overlap-chip strong {
+  color: #56687b;
+}
+
+.profile-overlap-chip span {
+  color: #223549;
+  font-weight: 650;
+}
+
+.profile-lens-marker {
+  position: absolute;
+  bottom: 12px;
+  transform: translateX(-50%);
+  border: 1px solid rgba(36, 82, 130, 0.35);
+  background: linear-gradient(180deg, #f5fbff, #dcefff);
+  border-radius: 8px;
+  padding: 2px 5px;
+  font-size: 0.68rem;
+  line-height: 1.2;
+  z-index: 3;
+  white-space: nowrap;
+  cursor: ew-resize;
+}
+
+.profile-lens-marker.dragging {
+  border-color: rgba(25, 110, 188, 0.75);
+  box-shadow: 0 0 0 2px rgba(45, 155, 240, 0.25);
+}
+
 .path-position-cell {
   display: inline-block;
   min-width: 56px;
@@ -524,6 +593,39 @@ details > summary {
 .stack {
   display: grid;
   gap: 12px;
+}
+
+.mode-matching-inline-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, max-content));
+  gap: 10px;
+  align-items: end;
+}
+
+.mode-matching-compact-field {
+  gap: 3px;
+}
+
+.mode-matching-compact-field span {
+  font-size: 0.76rem;
+}
+
+.mode-matching-compact-field input {
+  width: 88px;
+  padding: 4px 6px;
+  font-size: 0.76rem;
+}
+
+.mode-matching-inline-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+}
+
+.mode-matching-inline-toggle input {
+  width: auto;
+  margin: 0;
 }
 
 .list {

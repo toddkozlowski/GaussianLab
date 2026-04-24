@@ -10,6 +10,7 @@ import type { CardinalDirection, LensThinComponent, Point2d } from '../../../app
 interface LensRendererProps {
   component: LensThinComponent;
   mmToPx: (mm: number) => number;
+  onDragMove: (componentId: string, newPos: Point2d) => void;
   onDragEnd: (componentId: string, newPos: Point2d) => void;
   onSelect: (componentId: string) => void;
   isDraggable: boolean;
@@ -21,6 +22,7 @@ interface LensRendererProps {
 export const LensRenderer: React.FC<LensRendererProps> = ({
   component,
   mmToPx,
+  onDragMove,
   onDragEnd,
   onSelect,
   isDraggable,
@@ -40,6 +42,12 @@ export const LensRenderer: React.FC<LensRendererProps> = ({
     const newX = (e.target.x() + width / 2) / mmToPx(1);
     const newY = (e.target.y() + height / 2) / mmToPx(1);
     onDragEnd(component.id, { x: newX, y: newY });
+  };
+
+  const handleDragMove = (e: Konva.KonvaEventObject<DragEvent>) => {
+    const newX = (e.target.x() + width / 2) / mmToPx(1);
+    const newY = (e.target.y() + height / 2) / mmToPx(1);
+    onDragMove(component.id, { x: newX, y: newY });
   };
 
   return (
@@ -65,6 +73,7 @@ export const LensRenderer: React.FC<LensRendererProps> = ({
           };
         }}
         onDragEnd={handleDragEnd}
+        onDragMove={handleDragMove}
         onClick={() => onSelect(component.id)}
         onTap={() => onSelect(component.id)}
         cursor={isDraggable ? 'grab' : 'default'}

@@ -26,6 +26,8 @@ interface BeamProfileChartProps {
   hoveredZMm: number | null;
   onHoverZMm: (zMm: number | null) => void;
   showTargetProfile: boolean;
+  liveOverlap: number | null;
+  onMoveLensAlongPath: (lensId: string, zMm: number) => void;
 }
 
 interface ProfilePoint {
@@ -89,7 +91,12 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
   hoveredZMm,
   onHoverZMm,
   showTargetProfile,
+  liveOverlap,
+  onMoveLensAlongPath,
 }) => {
+  const frameRef = React.useRef<HTMLDivElement>(null);
+  const [draggingLensId, setDraggingLensId] = useState<string | null>(null);
+
   const baseProfile: ProfilePoint[] =
     propagationResult && propagationResult.profile.length > 0
       ? propagationResult.profile
@@ -105,6 +112,28 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
       .map((segment) => {
         const id = segment.terminatedByComponentId as string;
         return {
+          z: segment.zEnd,
+          label: components[id]?.label ?? id,
+        };
+      });
+  }, [beamPath, components]);
+
+  const lensMarkers = useMemo(() => {
+    if (!beamPath) {
+      return [] as Array<{ id: string; label: string; z: number }>;
+    }
+
+    return beamPath.segments
+      .filter((segment) => {
+        if (!segment.terminatedByComponentId) {
+          return false;
+        }
+        return components[segment.terminatedByComponentId]?.kind === 'lens_thin';
+      })
+      .map((segment) => {
+        const id = segment.terminatedByComponentId as string;
+        return {
+          id,
           z: segment.zEnd,
           label: components[id]?.label ?? id,
         };
@@ -134,9 +163,11 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
       return null;
     }
 
+    const m1ZMm = encounter.zEnd - cavity.length / 2;
+
     return {
       waistRadiusMm: cavity.eigenmode.waistRadius,
-      waistZMm: encounter.zEnd + cavity.eigenmode.waistPositionFromM1,
+      waistZMm: m1ZMm + cavity.eigenmode.waistPositionFromM1,
       label: `${cavity.label} target`,
     };
   }, [beamPath, components, source, targetMode]);
@@ -167,6 +198,7 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
   const useMicronAxis = effectiveYMaxMm * 1000 <= 3000;
   const axisScale = useMicronAxis ? 1000 : 1;
   const axisUnitLabel = useMicronAxis ? 'um' : 'mm';
+  const roundedYAxisMax = Math.max(1, Math.ceil(effectiveYMaxMm * axisScale));
   const chartData = profileData.map((point) => ({
     ...point,
     wAxis: point.w * axisScale,
@@ -200,7 +232,7 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
           />
         </label>
       </div>
-      <div className="profile-chart-frame">
+      <div className="profile-chart-frame" ref={frameRef}>
         <div style={{ width: '100%', height: 240 }}>
           <ResponsiveContainer>
             <LineChart
@@ -223,7 +255,7 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
               <YAxis
                 dataKey="wAxis"
                 type="number"
-                domain={[0, effectiveYMaxMm * axisScale]}
+                domain={[0, roundedYAxisMax]}
                 tick={{ fontSize: 11, fill: '#55677a' }}
                 label={{ value: `w (${axisUnitLabel})`, angle: -90, position: 'insideLeft', fill: '#55677a' }}
               />
@@ -279,10 +311,65 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
           </ResponsiveContainer>
         </div>
 
+        {lensMarkers.map((marker) => {
+          const zMax = profileData[profileData.length - 1]?.z ?? 1;
+          const leftPercent = zMax > 0 ? (marker.z / zMax) * 100 : 0;
+          return (
+            <button
+              key={marker.id}
+              type="button"
+              className={`profile-lens-marker${draggingLensId === marker.id ? ' dragging' : ''}`}
+              style={{ left: `${Math.max(0, Math.min(100, leftPercent))}%` }}
+              title={`Drag ${marker.label} along path`}
+              onPointerDown={(event) => {
+                const frame = frameRef.current;
+                if (!frame) {
+                  return;
+                }
+
+                event.preventDefault();
+                setDraggingLensId(marker.id);
+                event.currentTarget.setPointerCapture(event.pointerId);
+
+                const updateFromClientX = (clientX: number) => {
+                  const rect = frame.getBoundingClientRect();
+                  if (rect.width <= 0) {
+                    return;
+                  }
+                  const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
+                  const maxZ = profileData[profileData.length - 1]?.z ?? 0;
+                  onMoveLensAlongPath(marker.id, ratio * maxZ);
+                };
+
+                updateFromClientX(event.clientX);
+
+                const onMove = (moveEvent: PointerEvent) => updateFromClientX(moveEvent.clientX);
+                const onUp = () => {
+                  window.removeEventListener('pointermove', onMove);
+                  window.removeEventListener('pointerup', onUp);
+                  setDraggingLensId((active) => (active === marker.id ? null : active));
+                };
+
+                window.addEventListener('pointermove', onMove);
+                window.addEventListener('pointerup', onUp);
+              }}
+            >
+              <span>{marker.label}</span>
+            </button>
+          );
+        })}
+
         {hoveredPoint && (
           <div className="profile-hover-card">
             <strong>{formatBeamRadius(hoveredPoint.w)}</strong>
             <span>z = {hoveredPoint.z.toFixed(1)} mm</span>
+          </div>
+        )}
+
+        {showTargetProfile && liveOverlap !== null && (
+          <div className="profile-overlap-chip">
+            <strong>Overlap</strong>
+            <span>{(liveOverlap * 100).toFixed(1)}%</span>
           </div>
         )}
       </div>

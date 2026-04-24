@@ -72,3 +72,55 @@ export function modeMismatchPenalty(beam1WaistRadius: number, beam2WaistRadius: 
 export function effectiveRayleighRange(zR1: number, zR2: number): number {
   return Math.sqrt(zR1 * zR2); // Geometric mean (conservative)
 }
+
+/**
+ * Rigorous Gaussian beam power-coupling overlap from waist parameters.
+ *
+ * Derived from the q-parameter field overlap integral evaluated at any
+ * common reference plane (result is reference-plane independent):
+ *
+ *   O² = 4 · zR₁ · zR₂ / [ (z₀₁ − z₀₂)² + (zR₁ + zR₂)² ]
+ *
+ * where  zRᵢ = π · w₀ᵢ² / λ  (Rayleigh range of each beam)
+ *
+ * O² is the power fraction coupled (0 ≤ O² ≤ 1). Returns O (field
+ * overlap, 0 ≤ O ≤ 1) so it is consistent with the units of the rest
+ * of the overlap API.  100 % overlap requires both equal waist size AND
+ * equal waist position.
+ *
+ * All length inputs must be in the same units (mm recommended).
+ * wavelengthNm is in nanometres; the function converts internally.
+ *
+ * @param w01 Waist radius of beam 1 (mm)
+ * @param z01 Absolute waist position of beam 1 along the unfolded path (mm)
+ * @param w02 Waist radius of beam 2 (mm)
+ * @param z02 Absolute waist position of beam 2 along the unfolded path (mm)
+ * @param wavelengthNm Wavelength (nm)
+ * @returns Power-coupling overlap O (dimensionless, 0 ≤ O ≤ 1)
+ */
+export function calculateModeOverlapFromWaistParams(
+  w01: number,
+  z01: number,
+  w02: number,
+  z02: number,
+  wavelengthNm: number,
+): number {
+  if (w01 <= 0 || w02 <= 0 || wavelengthNm <= 0) {
+    return 0;
+  }
+
+  const lambdaMm = wavelengthNm * 1e-6; // nm → mm
+  const zR1 = (Math.PI * w01 * w01) / lambdaMm;
+  const zR2 = (Math.PI * w02 * w02) / lambdaMm;
+
+  const deltaZ = z01 - z02;
+  const denominator = deltaZ * deltaZ + (zR1 + zR2) * (zR1 + zR2);
+
+  if (denominator <= 0) {
+    return 0;
+  }
+
+  // O² = 4·zR1·zR2 / denom  →  O = sqrt(O²)
+  const overlapSq = (4 * zR1 * zR2) / denominator;
+  return Math.min(1, Math.sqrt(Math.max(0, overlapSq)));
+}

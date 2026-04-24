@@ -214,6 +214,39 @@ describe('Propagation Engine', () => {
   });
 
   describe('cavity checkpoint mode filtering', () => {
+    it('continues downstream profile for cavity coupling above the default 25% threshold', () => {
+      const q0 = { re: -100, im: 10 };
+      const matchingWaistRadiusMm = Math.sqrt((WAVELENGTH_M * 0.01) / Math.PI) * 1000;
+      const input: PropagationEngineInput = {
+        q0,
+        wavelengthMetres: WAVELENGTH_M,
+        segments: [
+          {
+            distance: 100,
+            abcdMatrix: { A: 1, B: 100, C: 0, D: 1 },
+            componentId: 'FP1',
+            componentKind: 'cavity_fp',
+            cavityEigenmode: {
+              waistRadius: matchingWaistRadiusMm,
+              waistPositionFromM1: 50,
+              stabilityProduct: 0.5,
+              isStable: true,
+            },
+            cavityLengthMm: 100,
+          },
+          {
+            distance: 25,
+            abcdMatrix: { A: 1, B: 25, C: 0, D: 1 },
+            componentId: null,
+          },
+        ],
+        componentZMap: { FP1: 100 },
+      };
+
+      const result = engine.propagateBeam(input);
+      expect(result.profile[result.profile.length - 1].z).toBeCloseTo(125, 6);
+    });
+
     it('switches to cavity eigenmode when overlap is above threshold', () => {
       const q0 = { re: 0, im: 10 };
       const input: PropagationEngineInput = {

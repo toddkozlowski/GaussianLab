@@ -1,122 +1,106 @@
 import type { AppState, OptimiserSolution } from './schema';
 import type { PropagationEngine } from './types/Layer0Interfaces';
-import { optimizeGridSearch } from '../../math/optimizer';
-import { calculateModeOverlapAtWaists } from '../../math/overlap';
+import { optimizeGridSearch, optimizeNelderMead, defaultOptimizerConfig } from '../../math/optimizer';
 import { resolveAppState } from './stateResolver';
+import { computeLiveModeOverlap } from './modeMetrics';
 
 function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value));
 }
 
-function nearestProfileWidth(state: AppState, zMm: number): number | null {
-  const profile = state.propagationResult?.profile;
-  if (!profile || profile.length === 0) {
-    return null;
-  }
-
-  let nearest = profile[0];
-  let nearestDistance = Math.abs(nearest.z - zMm);
-
-  for (let i = 1; i < profile.length; i += 1) {
-    const point = profile[i];
-    const distance = Math.abs(point.z - zMm);
-    if (distance < nearestDistance) {
-      nearestDistance = distance;
-      nearest = point;
-    }
-  }
-
-  return nearest.w;
-}
-
 function computeOverlapScore(state: AppState): number {
-  if (!state.targetMode || !state.propagationResult) {
-    return 0;
-  }
-
-  if (state.targetMode.kind === 'manual') {
-    const beamW = nearestProfileWidth(state, state.targetMode.waistZ);
-    if (beamW === null) {
-      return 0;
-    }
-    return clamp01(calculateModeOverlapAtWaists(Math.max(0.05, beamW), Math.max(0.05, state.targetMode.waistRadius)));
-  }
-
-  const cavity = state.components[state.targetMode.cavityComponentId];
-  if (!cavity || cavity.kind !== 'cavity_fp' || !cavity.eigenmode) {
-    return 0;
-  }
-
-  const z = state.beamPath?.segments.find((segment) => segment.terminatedByComponentId === cavity.id)?.zEnd;
-  if (z === undefined) {
-    return 0;
-  }
-
-  const beamW = nearestProfileWidth(state, z);
-  if (beamW === null) {
-    return 0;
-  }
-
-  return clamp01(calculateModeOverlapAtWaists(Math.max(0.05, beamW), Math.max(0.05, cavity.eigenmode.waistRadius)));
+  return clamp01(computeLiveModeOverlap(state) ?? 0);
 }
 
 export function runModeMatchSolver(
   state: AppState,
   propagationEngine: PropagationEngine,
-  maxSolutions: number = 5
+  maxSolutions: number = 5,
 ): OptimiserSolution[] {
   const movableLenses = Object.values(state.components).filter(
-    (component) => component.kind === 'lens_thin' && component.optimiserCanMove && !component.locked
+    (c) => c.kind === 'lens_thin' && c.optimiserCanMove && !c.locked,
   );
 
   if (!state.targetMode || movableLenses.length === 0) {
     return [];
   }
 
-  const bounds: Array<[number, number]> = movableLenses.map((lens) => {
-    const span = 150;
-    const minX = Math.max(0, lens.position.x - span);
-    const maxX = Math.min(state.table.width, lens.position.x + span);
-    return [minX, Math.max(minX + 1, maxX)];
+  // Determine the beam axis for each lens: x for horizontal segments, y for vertical.
+  // We look for the segment the lens currently terminates, or fall back to the first segment.
+  const lensAxes = movableLenses.map((lens) => {
+    const seg =
+      state.beamPath?.segments.find((s) => s.terminatedByComponentId === lens.id) ??
+      state.beamPath?.segments[0];
+    const dir = seg?.direction;
+    return dir === 'up' || dir === 'down' ? 'y' : 'x';
   });
 
-  const objective = (xPositions: number[]) => {
-    let trialState: AppState = {
-      ...state,
-      components: { ...state.components },
-    };
+  const bounds: Array<[number, number]> = movableLenses.map((lens, i) => {
+    const axis = lensAxes[i] as 'x' | 'y';
+    const current = lens.position[axis];
+    const span = 200;
+    const tableMax = axis === 'x' ? state.table.width : state.table.height;
+    const lo = Math.max(0, current - span);
+    const hi = Math.min(tableMax, current + span);
+    return [lo, Math.max(lo + 1, hi)];
+  });
 
-    movableLenses.forEach((lens, index) => {
-      trialState.components[lens.id] = {
+  const buildTrialState = (axisValues: number[]): AppState => {
+    const components = { ...state.components };
+    movableLenses.forEach((lens, i) => {
+      const axis = lensAxes[i] as 'x' | 'y';
+      components[lens.id] = {
         ...lens,
-        position: {
-          x: xPositions[index],
-          y: lens.position.y,
-        },
+        position: { ...lens.position, [axis]: axisValues[i] },
       };
     });
-
-    trialState = resolveAppState(trialState, propagationEngine);
-    return computeOverlapScore(trialState);
+    return resolveAppState({ ...state, components }, propagationEngine);
   };
 
-  const rawSolutions = optimizeGridSearch(objective, bounds, 7, maxSolutions);
+  const objective = (axisValues: number[]) => computeOverlapScore(buildTrialState(axisValues));
 
-  return rawSolutions.map((solution, index) => {
+  // Stage 1: coarse grid search to find candidate regions (25 pts/dim for 1 lens, 15 for 2+).
+  const gridPts = movableLenses.length === 1 ? 25 : 15;
+  const gridCandidates = optimizeGridSearch(objective, bounds, gridPts, maxSolutions * 2);
+
+  // Stage 2: refine each grid candidate with Nelder-Mead.
+  const refined: Array<{ params: number[]; value: number }> = [];
+  const nmConfig = { ...defaultOptimizerConfig, maxIterations: 600, tolerance: 1e-7 };
+  for (const candidate of gridCandidates) {
+    const sol = optimizeNelderMead(objective, candidate.parameters, bounds, nmConfig, 1);
+    if (sol.length > 0) {
+      refined.push({ params: sol[0].parameters, value: sol[0].objectiveValue });
+    }
+  }
+
+  // De-duplicate solutions that converged to the same position (within 2 mm).
+  const unique: typeof refined = [];
+  for (const sol of refined.sort((a, b) => b.value - a.value)) {
+    const isDuplicate = unique.some((u) =>
+      u.params.every((v, i) => Math.abs(v - sol.params[i]) < 2),
+    );
+    if (!isDuplicate) unique.push(sol);
+    if (unique.length >= maxSolutions) break;
+  }
+
+  const topSolutions = unique.length > 0 ? unique : gridCandidates.slice(0, maxSolutions).map((c) => ({
+    params: c.parameters,
+    value: c.objectiveValue,
+  }));
+
+  return topSolutions.map((sol, index) => {
     const lensPositions: Record<string, { x: number; y: number }> = {};
-    movableLenses.forEach((lens, lensIndex) => {
-      lensPositions[lens.id] = {
-        x: solution.parameters[lensIndex],
-        y: lens.position.y,
-      };
+    movableLenses.forEach((lens, i) => {
+      const axis = lensAxes[i] as 'x' | 'y';
+      lensPositions[lens.id] = { ...lens.position, [axis]: sol.params[i] };
     });
 
-    const overlap = clamp01(solution.objectiveValue);
+    const overlap = clamp01(sol.value);
     return {
       id: `solution-${index + 1}`,
       lensPositions,
       overlap,
-      summary: `Overlap ${(overlap * 100).toFixed(1)}% using ${movableLenses.length} movable lens/lenses`,
+      summary: `Overlap ${(overlap * 100).toFixed(1)}% — ${movableLenses.length} lens`,
     };
   });
 }

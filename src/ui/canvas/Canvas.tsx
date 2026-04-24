@@ -26,6 +26,7 @@ import { CavityRenderer } from './components/CavityRenderer';
 import { GridOverlay } from './GridOverlay';
 import { BeamCorridorOverlay } from './BeamCorridorOverlay';
 import { snapPointToGrid } from '../../app/state/snapToGrid';
+import { handleCaretStepKeyDown } from '../shared/numericCaretStep';
 import lockIcon from '../../../icons/lock.svg';
 import lockOpenIcon from '../../../icons/lock-open.svg';
 import rotateCcwIcon from '../../../icons/rotate-ccw.svg';
@@ -163,6 +164,22 @@ export const Canvas: React.FC<CanvasProps> = ({
   );
 
   const handleComponentDragEnd = (componentId: string, newPos: Point2d) => {
+    const component = components[componentId];
+    if (!component) {
+      return;
+    }
+
+    const normalized = normalizePosition(component, newPos);
+    dispatch({
+      type: 'UPDATE_COMPONENT',
+      payload: {
+        id: componentId,
+        updates: { position: normalized },
+      },
+    });
+  };
+
+  const handleComponentDragMove = (componentId: string, newPos: Point2d) => {
     const component = components[componentId];
     if (!component) {
       return;
@@ -379,6 +396,7 @@ export const Canvas: React.FC<CanvasProps> = ({
                   <LensRenderer
                     component={component}
                     mmToPx={mmToPx}
+                    onDragMove={handleComponentDragMove}
                     onDragEnd={handleComponentDragEnd}
                     onSelect={selectComponent}
                     isDraggable={!component.locked}
@@ -437,17 +455,29 @@ export const Canvas: React.FC<CanvasProps> = ({
             <label>
               X (mm)
               <input
-                type="number"
+                type="text"
+                inputMode="decimal"
                 value={formatFixed3(selected.position.x)}
                 onChange={(event) => updateCanvasPosition(dispatch, config, selected.id, selected.position, 'x', Number(event.target.value))}
+                onKeyDown={(event) =>
+                  handleCaretStepKeyDown(event, (value) =>
+                    updateCanvasPosition(dispatch, config, selected.id, selected.position, 'x', value),
+                  )
+                }
               />
             </label>
             <label>
               Y (mm)
               <input
-                type="number"
+                type="text"
+                inputMode="decimal"
                 value={formatFixed3(selected.position.y)}
                 onChange={(event) => updateCanvasPosition(dispatch, config, selected.id, selected.position, 'y', Number(event.target.value))}
+                onKeyDown={(event) =>
+                  handleCaretStepKeyDown(event, (value) =>
+                    updateCanvasPosition(dispatch, config, selected.id, selected.position, 'y', value),
+                  )
+                }
               />
             </label>
           </div>
@@ -469,7 +499,8 @@ export const Canvas: React.FC<CanvasProps> = ({
               <label>
                 Waist r (um)
                 <input
-                  type="number"
+                  type="text"
+                  inputMode="decimal"
                   step={1}
                   value={Math.round(selected.waistRadius * 1000)}
                   onChange={(event) => {
@@ -484,12 +515,24 @@ export const Canvas: React.FC<CanvasProps> = ({
                       });
                     }
                   }}
+                  onKeyDown={(event) =>
+                    handleCaretStepKeyDown(event, (value) => {
+                      dispatch({
+                        type: 'UPDATE_COMPONENT',
+                        payload: {
+                          id: selected.id,
+                          updates: { waistRadius: Math.max(1, value) / 1000 },
+                        },
+                      });
+                    })
+                  }
                 />
               </label>
               <label>
                 Waist z (mm)
                 <input
-                  type="number"
+                  type="text"
+                  inputMode="decimal"
                   step={0.1}
                   value={formatFixed3(selected.waistOffset)}
                   onChange={(event) => {
@@ -504,12 +547,24 @@ export const Canvas: React.FC<CanvasProps> = ({
                       });
                     }
                   }}
+                  onKeyDown={(event) =>
+                    handleCaretStepKeyDown(event, (value) => {
+                      dispatch({
+                        type: 'UPDATE_COMPONENT',
+                        payload: {
+                          id: selected.id,
+                          updates: { waistOffset: round3(value) },
+                        },
+                      });
+                    })
+                  }
                 />
               </label>
               <label>
                 lambda (nm)
                 <input
-                  type="number"
+                  type="text"
+                  inputMode="decimal"
                   step={1}
                   value={formatFixed3(selected.wavelength)}
                   onChange={(event) => {
@@ -524,6 +579,17 @@ export const Canvas: React.FC<CanvasProps> = ({
                       });
                     }
                   }}
+                  onKeyDown={(event) =>
+                    handleCaretStepKeyDown(event, (value) => {
+                      dispatch({
+                        type: 'UPDATE_COMPONENT',
+                        payload: {
+                          id: selected.id,
+                          updates: { wavelength: Math.max(1, value) },
+                        },
+                      });
+                    })
+                  }
                 />
               </label>
             </div>
@@ -534,7 +600,8 @@ export const Canvas: React.FC<CanvasProps> = ({
               <label>
                 Focal length (mm)
                 <input
-                  type="number"
+                  type="text"
+                  inputMode="decimal"
                   value={formatFixed3(selected.focalLength)}
                   onChange={(event) => {
                     const value = Number(event.target.value);
@@ -545,6 +612,14 @@ export const Canvas: React.FC<CanvasProps> = ({
                       });
                     }
                   }}
+                  onKeyDown={(event) =>
+                    handleCaretStepKeyDown(event, (value) => {
+                      dispatch({
+                        type: 'UPDATE_COMPONENT',
+                        payload: { id: selected.id, updates: { focalLength: round3(value) } },
+                      });
+                    })
+                  }
                 />
               </label>
             </div>
@@ -580,7 +655,8 @@ export const Canvas: React.FC<CanvasProps> = ({
               <label>
                 Length (mm)
                 <input
-                  type="number"
+                  type="text"
+                  inputMode="decimal"
                   value={formatFixed3(selected.length)}
                   onChange={(event) => {
                     const value = Number(event.target.value);
@@ -591,24 +667,40 @@ export const Canvas: React.FC<CanvasProps> = ({
                       });
                     }
                   }}
+                  onKeyDown={(event) =>
+                    handleCaretStepKeyDown(event, (value) => {
+                      dispatch({
+                        type: 'UPDATE_COMPONENT',
+                        payload: { id: selected.id, updates: { length: round3(Math.max(1, value)) } },
+                      });
+                    })
+                  }
                 />
               </label>
               <label>
                 R1 (mm)
                 <input
-                  type="number"
+                  type="text"
+                  inputMode="decimal"
                   value={Number.isFinite(selected.r1) ? formatFixed3(selected.r1) : ''}
                   placeholder="Infinity"
                   onChange={(event) => updateCavityRadius(dispatch, selected.id, 'r1', event.target.value)}
+                  onKeyDown={(event) =>
+                    handleCaretStepKeyDown(event, (value) => updateCavityRadius(dispatch, selected.id, 'r1', String(value)))
+                  }
                 />
               </label>
               <label>
                 R2 (mm)
                 <input
-                  type="number"
+                  type="text"
+                  inputMode="decimal"
                   value={Number.isFinite(selected.r2) ? formatFixed3(selected.r2) : ''}
                   placeholder="Infinity"
                   onChange={(event) => updateCavityRadius(dispatch, selected.id, 'r2', event.target.value)}
+                  onKeyDown={(event) =>
+                    handleCaretStepKeyDown(event, (value) => updateCavityRadius(dispatch, selected.id, 'r2', String(value)))
+                  }
                 />
               </label>
             </div>

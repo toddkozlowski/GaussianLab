@@ -7,12 +7,15 @@ import {
   createSourceComponent,
 } from '../state/componentFactories';
 import type { AppState, CardinalDirection, OpticalComponent, Point2d } from '../state/schema';
+import { computeDangerousPairs, getComponentPathPosition } from '../state';
+import { handleCaretStepKeyDown } from '../../ui/shared/numericCaretStep';
 import chevronDownIcon from '../../../icons/circle-chevron-down.svg';
 import chevronUpIcon from '../../../icons/circle-chevron-up.svg';
 import helpIcon from '../../../icons/circle-question-mark.svg';
 import lockIcon from '../../../icons/lock.svg';
 import lockOpenIcon from '../../../icons/lock-open.svg';
 import trashIcon from '../../../icons/trash-2.svg';
+import warningIcon from '../../../icons/triangle-alert.svg';
 
 interface SidebarProps {
   showTargetProfile: boolean;
@@ -30,6 +33,18 @@ export function Sidebar({ showTargetProfile, onToggleTargetProfile }: SidebarPro
     () => Object.values(state.components).filter((component) => component.kind === 'cavity_fp'),
     [state.components]
   );
+
+  const dangerousPairs = useMemo(() => computeDangerousPairs(state.components, 10), [state.components]);
+  const proximityByComponent = useMemo(() => {
+    const map: Record<string, Array<{ otherLabel: string; distanceMm: number }>> = {};
+    for (const pair of dangerousPairs) {
+      map[pair.aId] = map[pair.aId] ?? [];
+      map[pair.bId] = map[pair.bId] ?? [];
+      map[pair.aId].push({ otherLabel: pair.bLabel, distanceMm: pair.distanceMm });
+      map[pair.bId].push({ otherLabel: pair.aLabel, distanceMm: pair.distanceMm });
+    }
+    return map;
+  }, [dangerousPairs]);
 
   const orderedComponents = useMemo(() => getOrderedComponents(state), [state]);
   const defaultPlacement = getDefaultPlacement(state);
@@ -120,12 +135,14 @@ export function Sidebar({ showTargetProfile, onToggleTargetProfile }: SidebarPro
                   <th>Prop</th>
                   <th>Lock</th>
                   <th>Del</th>
+                  <th>Warn</th>
                 </tr>
               </thead>
               <tbody>
                 {orderedComponents.map((component) => {
                   const isSelected = state.selectedComponentId === component.id;
-                  const pathPosition = getComponentPathPosition(state, component.id);
+                  const pathPosition = getComponentPathPosition(state.sourceId, state.beamPath, component.id);
+                  const warnings = proximityByComponent[component.id] ?? [];
                   return (
                     <tr
                       key={component.id}
@@ -185,6 +202,24 @@ export function Sidebar({ showTargetProfile, onToggleTargetProfile }: SidebarPro
                           <img className="icon-glyph" src={trashIcon} alt="" />
                         </button>
                       </td>
+                      <td>
+                        {warnings.length > 0 && (
+                          <button
+                            type="button"
+                            className="icon-button warning-button"
+                            aria-label="Show proximity warning"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              const lines = warnings
+                                .map((entry) => `${component.label} is ${entry.distanceMm.toFixed(3)} mm from ${entry.otherLabel}`)
+                                .join('\n');
+                              window.alert(lines);
+                            }}
+                          >
+                            <img className="icon-glyph" src={warningIcon} alt="" />
+                          </button>
+                        )}
+                      </td>
                     </tr>
                   );
                 })}
@@ -211,26 +246,32 @@ export function Sidebar({ showTargetProfile, onToggleTargetProfile }: SidebarPro
         {modeMatchingOpen && (
           <div className="panel-body">
             <div className="stack">
-              <label>
-                Manual waist radius (um)
-                <input
-                  type="number"
-                  value={manualWaistRadiusUm}
-                  min={1}
-                  step={1}
-                  onChange={(event) => setManualWaistRadiusUm(Number(event.target.value))}
-                />
-              </label>
-              <label>
-                Manual waist z (mm)
-                <input
-                  type="number"
-                  value={formatFixed3(manualWaistZ)}
-                  min={0}
-                  step={10}
-                  onChange={(event) => setManualWaistZ(Number(event.target.value))}
-                />
-              </label>
+              <div className="mode-matching-inline-row">
+                <label className="mode-matching-compact-field">
+                  <span>Waist r (um)</span>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={manualWaistRadiusUm}
+                    min={1}
+                    step={1}
+                    onChange={(event) => setManualWaistRadiusUm(Number(event.target.value))}
+                    onKeyDown={(event) => handleCaretStepKeyDown(event, (value) => setManualWaistRadiusUm(Math.max(1, value)))}
+                  />
+                </label>
+                <label className="mode-matching-compact-field">
+                  <span>Waist z (mm)</span>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    value={formatFixed3(manualWaistZ)}
+                    min={0}
+                    step={10}
+                    onChange={(event) => setManualWaistZ(Number(event.target.value))}
+                    onKeyDown={(event) => handleCaretStepKeyDown(event, (value) => setManualWaistZ(Math.max(0, value)))}
+                  />
+                </label>
+              </div>
               <button type="button" onClick={setManualTarget}>Use manual target</button>
 
               <label>
@@ -247,8 +288,8 @@ export function Sidebar({ showTargetProfile, onToggleTargetProfile }: SidebarPro
               </label>
               <button type="button" onClick={setCavityTarget} disabled={!selectedCavityId}>Use cavity target</button>
 
-              <label>
-                Show target mode profile
+              <label className="mode-matching-inline-toggle">
+                <span>Show target mode</span>
                 <input
                   type="checkbox"
                   checked={showTargetProfile}
@@ -305,7 +346,8 @@ function renderPropertyCell(
   if (component.kind === 'source') {
     return (
       <input
-        type="number"
+        type="text"
+        inputMode="decimal"
         value={Math.round(component.waistRadius * 1000)}
         onChange={(event) => {
           event.stopPropagation();
@@ -317,6 +359,15 @@ function renderPropertyCell(
             });
           }
         }}
+        onKeyDown={(event) =>
+          handleCaretStepKeyDown(event, (value) => {
+            event.stopPropagation();
+            dispatch({
+              type: 'UPDATE_COMPONENT',
+              payload: { id: component.id, updates: { waistRadius: Math.max(1, value) / 1000 } },
+            });
+          })
+        }
       />
     );
   }
@@ -324,7 +375,8 @@ function renderPropertyCell(
   if (component.kind === 'lens_thin') {
     return (
       <input
-        type="number"
+        type="text"
+        inputMode="decimal"
         value={formatFixed3(component.focalLength)}
         onChange={(event) => {
           event.stopPropagation();
@@ -336,6 +388,15 @@ function renderPropertyCell(
             });
           }
         }}
+        onKeyDown={(event) =>
+          handleCaretStepKeyDown(event, (value) => {
+            event.stopPropagation();
+            dispatch({
+              type: 'UPDATE_COMPONENT',
+              payload: { id: component.id, updates: { focalLength: value } },
+            });
+          })
+        }
       />
     );
   }
@@ -362,7 +423,8 @@ function renderPropertyCell(
 
   return (
     <input
-      type="number"
+      type="text"
+      inputMode="decimal"
       value={formatFixed3(component.length)}
       onChange={(event) => {
         event.stopPropagation();
@@ -374,6 +436,15 @@ function renderPropertyCell(
           });
         }
       }}
+      onKeyDown={(event) =>
+        handleCaretStepKeyDown(event, (value) => {
+          event.stopPropagation();
+          dispatch({
+            type: 'UPDATE_COMPONENT',
+            payload: { id: component.id, updates: { length: Math.max(1, value) } },
+          });
+        })
+      }
     />
   );
 }
@@ -390,10 +461,6 @@ function formatFixed3(value: number): string {
     return '';
   }
   return value.toFixed(3);
-}
-
-function round3(value: number): number {
-  return Math.round(value * 1000) / 1000;
 }
 
 function LockIcon({ locked }: { locked: boolean }) {
@@ -424,15 +491,6 @@ function getOrderedComponents(state: AppState): OpticalComponent[] {
   }
 
   return ordered;
-}
-
-function getComponentPathPosition(state: AppState, componentId: string): number | null {
-  if (state.sourceId === componentId) {
-    return 0;
-  }
-
-  const segment = state.beamPath?.segments.find((entry) => entry.terminatedByComponentId === componentId);
-  return segment ? round3(segment.zEnd) : null;
 }
 
 function formatPathPosition(value: number | null): string {

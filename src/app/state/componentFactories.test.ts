@@ -36,6 +36,7 @@ describe('componentFactories', () => {
     expect(lens.optimiserCanMove).toBe(true);
     expect(cavity.eigenmode).toBeNull();
     expect(cavity.length).toBe(100);
-    expect(cavity.r1).toBe(Number.POSITIVE_INFINITY);
+    expect(cavity.r1).toBe(100);
+    expect(cavity.r2).toBe(100);
   });
 });

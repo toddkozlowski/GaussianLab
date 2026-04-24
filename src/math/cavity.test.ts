@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { solveEigenmode, isCavityStable, type Cavity, type CavityEigenmode } from './cavity';
+import { solveEigenmode, solveTwoMirrorEigenmode, isCavityStable, type Cavity, type CavityEigenmode } from './cavity';
 import { createABCD, multiplyABCD, freeSpaceABCD, mirrorABCD } from './abcd';
 import { rayleighRange } from './qParameter';
 
@@ -146,6 +146,25 @@ describe('Cavity eigenmode solver', () => {
         expect(eigenmode.waistRadiusM).toBeLessThan(L / 10);
         expect(eigenmode.waistRadiusM).toBeGreaterThan(WAVELENGTH_M); // > wavelength
       }
+    });
+  });
+
+  describe('two-mirror geometry solver', () => {
+    it('solves a symmetric stable cavity from mirror geometry', () => {
+      const eigenmode = solveTwoMirrorEigenmode(0.1, 0.2, 0.2, WAVELENGTH_M);
+      expect(eigenmode).not.toBeNull();
+      expect(eigenmode?.isStable).toBe(true);
+      expect(eigenmode?.waistRadiusM).toBeGreaterThan(0);
+      expect(eigenmode?.waistPositionInCavityM).toBeCloseTo(0.05, 10);
+    });
+
+    it('solves the confocal cavity limit from mirror geometry', () => {
+      const eigenmode = solveTwoMirrorEigenmode(0.1, 0.1, 0.1, WAVELENGTH_M);
+      expect(eigenmode).not.toBeNull();
+      expect(eigenmode?.isStable).toBe(true);
+      expect(eigenmode?.waistPositionInCavityM).toBeCloseTo(0.05, 10);
+      expect(eigenmode?.q.im).toBeCloseTo(0.05, 10);
+      expect(eigenmode?.waistRadiusM).toBeGreaterThan(0);
     });
   });
 });

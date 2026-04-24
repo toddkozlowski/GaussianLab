@@ -152,7 +152,7 @@ function beamPathToSegments(state: AppState, beamPath: BeamPath): any[] {
       lensFocalLengthMm: terminated?.kind === 'lens_thin' ? terminated.focalLength : undefined,
       cavityEigenmode: terminated?.kind === 'cavity_fp' ? terminated.eigenmode : undefined,
       cavityLengthMm: terminated?.kind === 'cavity_fp' ? terminated.length : undefined,
-      cavityCouplingThreshold: terminated?.kind === 'cavity_fp' ? 0.1 : undefined,
+      cavityCouplingThreshold: terminated?.kind === 'cavity_fp' ? 0.25 : undefined,
     };
   });
 }

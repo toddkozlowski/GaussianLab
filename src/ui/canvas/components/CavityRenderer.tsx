@@ -28,8 +28,14 @@ export const CavityRenderer: React.FC<CavityRendererProps> = ({
 
   const x = mmToPx(component.position.x);
   const y = mmToPx(component.position.y);
-  const cavityLengthPx = mmToPx(Math.min(component.length, 30)); // Cap display length
-  const mirrorHeight = mmToPx(24);
+  const cavityLengthPx = mmToPx(Math.max(1, Math.round(component.length)));
+  const mirrorThickness = Math.max(2, mmToPx(1));
+  const mirrorSpan = Math.max(12, mmToPx(24));
+  const isHorizontal = component.direction === 'right' || component.direction === 'left';
+  const leftMirrorX = -cavityLengthPx / 2 - mirrorThickness / 2;
+  const rightMirrorX = cavityLengthPx / 2 - mirrorThickness / 2;
+  const topMirrorY = -cavityLengthPx / 2 - mirrorThickness / 2;
+  const bottomMirrorY = cavityLengthPx / 2 - mirrorThickness / 2;
 
   const handleDragEnd = (e: Konva.KonvaEventObject<DragEvent>) => {
     if (groupRef.current) {
@@ -58,39 +64,64 @@ export const CavityRenderer: React.FC<CavityRendererProps> = ({
         document.body.style.cursor = 'default';
       }}
     >
-      {/* M1 (left mirror) */}
-      <Rect
-        x={-cavityLengthPx / 2}
-        y={-mirrorHeight / 2}
-        width={mmToPx(1)}
-        height={mirrorHeight}
-        fill={fillColor}
-        stroke={isSelected ? '#1f6feb' : '#333'}
-        strokeWidth={isSelected ? 3 : 2}
-      />
-
-      {/* Cavity space */}
-      <Line
-        points={[-cavityLengthPx / 2, 0, cavityLengthPx / 2, 0]}
-        stroke="#999"
-        strokeWidth={1}
-      />
-
-      {/* M2 (right mirror) */}
-      <Rect
-        x={cavityLengthPx / 2 - mmToPx(1)}
-        y={-mirrorHeight / 2}
-        width={mmToPx(1)}
-        height={mirrorHeight}
-        fill={fillColor}
-        stroke={isSelected ? '#1f6feb' : '#333'}
-        strokeWidth={isSelected ? 3 : 2}
-      />
+      {isHorizontal ? (
+        <>
+          <Rect
+            x={leftMirrorX}
+            y={-mirrorSpan / 2}
+            width={mirrorThickness}
+            height={mirrorSpan}
+            fill={fillColor}
+            stroke={isSelected ? '#1f6feb' : '#333'}
+            strokeWidth={isSelected ? 3 : 2}
+          />
+          <Line
+            points={[-cavityLengthPx / 2, 0, cavityLengthPx / 2, 0]}
+            stroke="#999"
+            strokeWidth={1}
+          />
+          <Rect
+            x={rightMirrorX}
+            y={-mirrorSpan / 2}
+            width={mirrorThickness}
+            height={mirrorSpan}
+            fill={fillColor}
+            stroke={isSelected ? '#1f6feb' : '#333'}
+            strokeWidth={isSelected ? 3 : 2}
+          />
+        </>
+      ) : (
+        <>
+          <Rect
+            x={-mirrorSpan / 2}
+            y={topMirrorY}
+            width={mirrorSpan}
+            height={mirrorThickness}
+            fill={fillColor}
+            stroke={isSelected ? '#1f6feb' : '#333'}
+            strokeWidth={isSelected ? 3 : 2}
+          />
+          <Line
+            points={[0, -cavityLengthPx / 2, 0, cavityLengthPx / 2]}
+            stroke="#999"
+            strokeWidth={1}
+          />
+          <Rect
+            x={-mirrorSpan / 2}
+            y={bottomMirrorY}
+            width={mirrorSpan}
+            height={mirrorThickness}
+            fill={fillColor}
+            stroke={isSelected ? '#1f6feb' : '#333'}
+            strokeWidth={isSelected ? 3 : 2}
+          />
+        </>
+      )}
 
       {/* Label */}
       <Text
-        x={cavityLengthPx / 2 + 5}
-        y={-mirrorHeight / 2 - 8}
+        x={isHorizontal ? cavityLengthPx / 2 + 5 : mirrorSpan / 2 + 5}
+        y={isHorizontal ? -mirrorSpan / 2 - 8 : -cavityLengthPx / 2 - 16}
         text={component.label}
         fontSize={12}
         fill="#333"
@@ -99,9 +130,9 @@ export const CavityRenderer: React.FC<CavityRendererProps> = ({
 
       {/* Length label */}
       <Text
-        x={-cavityLengthPx / 4}
-        y={-mirrorHeight / 2 - 20}
-        text={`L=${component.length.toFixed(0)}mm`}
+        x={isHorizontal ? -cavityLengthPx / 4 : mirrorSpan / 2 + 5}
+        y={isHorizontal ? -mirrorSpan / 2 - 20 : -cavityLengthPx / 2 - 2}
+        text={`L=${Math.round(component.length)}mm`}
         fontSize={10}
         fill="#666"
         pointerEvents="none"

@@ -80,7 +80,7 @@ export function createCavityFPComponent(
     locked: false,
     label: nextLabel('FP', countComponentsByKind(components, 'cavity_fp')),
     length: 100,
-    r1: Number.POSITIVE_INFINITY,
+    r1: 100,
     r2: 100,
     direction: 'right',
     eigenmode: null,

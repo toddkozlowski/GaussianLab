@@ -8,7 +8,7 @@
  *   C*q² + (D-A)*q - B = 0
  *
  * The cavity is stable if and only if 0 ≤ g1*g2 ≤ 1,
- * where g = 1 - L/(2*R) for each mirror.
+ * where g = 1 - L/R for each mirror.
  */
 
 import { complexMul, complexDiv, complexAdd, complexSub, complexInv, complexSqrt, type Complex } from './complex';
@@ -37,10 +37,86 @@ export interface CavityEigenmode {
   g2: number; // Stability parameter for mirror 2
 }
 
+function gParameter(lengthM: number, radiusM: number): number {
+  if (!Number.isFinite(radiusM)) {
+    return 1;
+  }
+  return 1 - lengthM / radiusM;
+}
+
+export function solveTwoMirrorEigenmode(
+  lengthM: number,
+  radius1M: number,
+  radius2M: number,
+  wavelengthM: number,
+): CavityEigenmode | null {
+  if (!(lengthM > 0) || !(wavelengthM > 0)) {
+    return null;
+  }
+
+  const g1 = gParameter(lengthM, radius1M);
+  const g2 = gParameter(lengthM, radius2M);
+  const stabilityProduct = g1 * g2;
+  const isStable = stabilityProduct >= 0 && stabilityProduct <= 1;
+  if (!isStable) {
+    return null;
+  }
+
+  let waistPositionInCavityM: number;
+  let zRM: number;
+
+  const eps = 1e-12;
+  const r1Finite = Number.isFinite(radius1M);
+  const r2Finite = Number.isFinite(radius2M);
+
+  if (r1Finite && r2Finite && Math.abs(radius1M - lengthM) < eps && Math.abs(radius2M - lengthM) < eps) {
+    waistPositionInCavityM = lengthM / 2;
+    zRM = lengthM / 2;
+  } else if (!r1Finite && r2Finite) {
+    waistPositionInCavityM = 0;
+    const zR2 = lengthM * (radius2M - lengthM);
+    if (!(zR2 > 0)) {
+      return null;
+    }
+    zRM = Math.sqrt(zR2);
+  } else if (r1Finite && !r2Finite) {
+    waistPositionInCavityM = lengthM;
+    const zR2 = lengthM * (radius1M - lengthM);
+    if (!(zR2 > 0)) {
+      return null;
+    }
+    zRM = Math.sqrt(zR2);
+  } else if (!r1Finite && !r2Finite) {
+    return null;
+  } else {
+    const denominator = radius1M + radius2M - 2 * lengthM;
+    if (Math.abs(denominator) < eps) {
+      return null;
+    }
+
+    waistPositionInCavityM = (lengthM * (radius2M - lengthM)) / denominator;
+    const zR2 = waistPositionInCavityM * (radius1M - waistPositionInCavityM);
+    if (!(zR2 > 0)) {
+      return null;
+    }
+    zRM = Math.sqrt(zR2);
+  }
+
+  const waistRadiusM = Math.sqrt((wavelengthM * zRM) / Math.PI);
+  return {
+    q: { re: -waistPositionInCavityM, im: zRM },
+    waistRadiusM,
+    waistPositionInCavityM,
+    isStable: true,
+    g1,
+    g2,
+  };
+}
+
 /**
  * Compute stability parameters g1 and g2.
  * For a mirror with radius R and distance L from the other mirror:
- *   g = 1 - L/(2*R)
+ *   g = 1 - L/R
  * Cavity is stable iff 0 ≤ g1*g2 ≤ 1
  *
  * @param cavity Cavity configuration
@@ -52,8 +128,8 @@ function computeStabilityParameters(cavity: Cavity): { g1: number; g2: number; i
   }
 
   const L = cavity.distanceBetweenMirrors;
-  const g1 = 1 - L / (2 * cavity.mirror1.radiusOfCurvatureM);
-  const g2 = 1 - L / (2 * cavity.mirror2.radiusOfCurvatureM);
+  const g1 = 1 - L / cavity.mirror1.radiusOfCurvatureM;
+  const g2 = 1 - L / cavity.mirror2.radiusOfCurvatureM;
   const product = g1 * g2;
   const isStable = product >= 0 && product <= 1;
 

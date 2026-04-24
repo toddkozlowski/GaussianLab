@@ -93,9 +93,13 @@ export class ConcreteBeamPropagationEngine implements PropagationEngine {
           });
         }
       } else if (segment.componentKind === 'cavity_fp' && segment.cavityEigenmode?.isStable) {
-        const cavityQAtInput = cavityEigenmodeAtInput(segment.cavityEigenmode, wavelengthMetres);
+        const cavityQAtBoundary = cavityEigenmodeAtBoundary(
+          segment.cavityEigenmode,
+          wavelengthMetres,
+          segment.cavityLengthMm
+        );
         const beamAtInput = beamFromQ(qAtBoundary, wavelengthMetres);
-        const cavityAtInput = beamFromQ(cavityQAtInput, wavelengthMetres);
+        const cavityAtInput = beamFromQ(cavityQAtBoundary, wavelengthMetres);
 
         const overlap = calculateModeOverlap(
           beamAtInput.radius,
@@ -105,13 +109,11 @@ export class ConcreteBeamPropagationEngine implements PropagationEngine {
           wavelengthMetres
         );
 
-        const threshold = segment.cavityCouplingThreshold ?? 0.1;
+        const threshold = segment.cavityCouplingThreshold ?? 0.25;
         if (overlap >= threshold) {
-          const cavityLengthM = Math.max(0, (segment.cavityLengthMm ?? 0) / 1000);
-          qAfterBoundary = {
-            re: cavityQAtInput.re + cavityLengthM,
-            im: cavityQAtInput.im,
-          };
+          // Beam path geometry meets a cavity at its stored center position.
+          // Switch onto the cavity eigenmode referenced at that same plane.
+          qAfterBoundary = cavityQAtBoundary;
         } else {
           terminateAfterBoundary = true;
         }
@@ -177,15 +179,17 @@ function beamFromQ(q: Complex, wavelengthMetres: number): { radius: number; wais
   };
 }
 
-function cavityEigenmodeAtInput(
+function cavityEigenmodeAtBoundary(
   eigenmode: { waistRadius: number; waistPositionFromM1: number },
-  wavelengthMetres: number
+  wavelengthMetres: number,
+  cavityLengthMm?: number
 ): Complex {
   const cavityWaistRadiusM = Math.max(1e-9, eigenmode.waistRadius / 1000);
-  const cavityWaistPositionM = eigenmode.waistPositionFromM1 / 1000;
+  const cavityLengthM = Math.max(0, (cavityLengthMm ?? 0) / 1000);
+  const cavityWaistPositionAtBoundaryM = eigenmode.waistPositionFromM1 / 1000 - cavityLengthM / 2;
   const zR = rayleighRange(cavityWaistRadiusM, wavelengthMetres);
   return {
-    re: -cavityWaistPositionM,
+    re: -cavityWaistPositionAtBoundaryM,
     im: zR,
   };
 }
