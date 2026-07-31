@@ -107,8 +107,15 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
       return [] as Array<{ z: number; label: string }>;
     }
 
+    // Cavities get their own dedicated in/out/waist markers (see
+    // cavityMarkers below) instead of a single generic label.
     return beamPath.segments
-      .filter((segment) => segment.terminatedByComponentId)
+      .filter((segment) => {
+        if (!segment.terminatedByComponentId) {
+          return false;
+        }
+        return components[segment.terminatedByComponentId]?.kind !== 'cavity_fp';
+      })
       .map((segment) => {
         const id = segment.terminatedByComponentId as string;
         return {
@@ -117,6 +124,77 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
         };
       });
   }, [beamPath, components]);
+
+  const cavityMarkers = useMemo(() => {
+    if (!beamPath) {
+      return [] as Array<{ z: number; label: string; kind: 'mirror' | 'waist' }>;
+    }
+
+    const markers: Array<{ z: number; label: string; kind: 'mirror' | 'waist' }> = [];
+
+    for (const segment of beamPath.segments) {
+      const id = segment.terminatedByComponentId;
+      if (!id) {
+        continue;
+      }
+
+      const component = components[id];
+      if (!component || component.kind !== 'cavity_fp') {
+        continue;
+      }
+
+      // component.position anchors the input mirror (M1); the output
+      // mirror (M2) sits `length` further downstream.
+      const m1ZMm = segment.zEnd;
+      const m2ZMm = m1ZMm + component.length;
+
+      markers.push({ z: m1ZMm, label: `${component.label}_in`, kind: 'mirror' });
+      markers.push({ z: m2ZMm, label: `${component.label}_out`, kind: 'mirror' });
+
+      if (component.eigenmode) {
+        markers.push({
+          z: m1ZMm + component.eigenmode.waistPositionFromM1,
+          label: `${component.label}_waist`,
+          kind: 'waist',
+        });
+      }
+    }
+
+    return markers;
+  }, [beamPath, components]);
+
+  const cavityOverlapMarkers = useMemo(() => {
+    if (!beamPath || !propagationResult) {
+      return [] as Array<{ z: number; label: string; good: boolean }>;
+    }
+
+    const markers: Array<{ z: number; label: string; good: boolean }> = [];
+
+    for (const segment of beamPath.segments) {
+      const id = segment.terminatedByComponentId;
+      if (!id) {
+        continue;
+      }
+
+      const component = components[id];
+      if (!component || component.kind !== 'cavity_fp') {
+        continue;
+      }
+
+      const overlap = propagationResult.cavityOverlap[id];
+      if (typeof overlap !== 'number') {
+        continue;
+      }
+
+      markers.push({
+        z: segment.zEnd,
+        label: `${(overlap * 100).toFixed(1)}%`,
+        good: overlap >= 0.5,
+      });
+    }
+
+    return markers;
+  }, [beamPath, components, propagationResult]);
 
   const lensMarkers = useMemo(() => {
     if (!beamPath) {
@@ -141,20 +219,30 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
   }, [beamPath, components]);
 
   const target = useMemo(() => {
-    if (!targetMode || !source) {
+    if (!targetMode || !source || !beamPath) {
       return null as null | { waistRadiusMm: number; waistZMm: number; label: string };
     }
 
-    if (targetMode.kind === 'manual') {
+    if (targetMode.kind === 'target') {
+      const targetComponent = components[targetMode.targetComponentId];
+      if (!targetComponent || targetComponent.kind !== 'target') {
+        return null;
+      }
+
+      const encounter = beamPath.segments.find((segment) => segment.terminatedByComponentId === targetComponent.id);
+      if (!encounter) {
+        return null;
+      }
+
       return {
-        waistRadiusMm: targetMode.waistRadius,
-        waistZMm: targetMode.waistZ,
-        label: 'Manual target',
+        waistRadiusMm: targetComponent.waistRadius,
+        waistZMm: encounter.zEnd,
+        label: `${targetComponent.label} target`,
       };
     }
 
     const cavity = components[targetMode.cavityComponentId];
-    if (!cavity || cavity.kind !== 'cavity_fp' || !cavity.eigenmode || !beamPath) {
+    if (!cavity || cavity.kind !== 'cavity_fp' || !cavity.eigenmode) {
       return null;
     }
 
@@ -163,7 +251,9 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
       return null;
     }
 
-    const m1ZMm = encounter.zEnd - cavity.length / 2;
+    // The beam path treats the cavity's stored position as its input mirror
+    // (M1), so encounter.zEnd already is M1's z-position.
+    const m1ZMm = encounter.zEnd;
 
     return {
       waistRadiusMm: cavity.eigenmode.waistRadius,
@@ -237,7 +327,7 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
           <ResponsiveContainer>
             <LineChart
               data={chartData}
-              margin={{ top: 8, right: 16, bottom: 8, left: 8 }}
+              margin={{ top: 22, right: 16, bottom: 8, left: 8 }}
               onMouseMove={(state: any) => {
                 const z = typeof state?.activeLabel === 'number' ? state.activeLabel : null;
                 onHoverZMm(z);
@@ -287,6 +377,36 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
                   stroke="#8ca0b5"
                   strokeDasharray="4 4"
                   label={{ value: marker.label, position: 'insideTop', fill: '#4f6174', fontSize: 11 }}
+                />
+              ))}
+
+              {cavityMarkers.map((marker, index) => (
+                <ReferenceLine
+                  key={`cavity-${index}`}
+                  x={marker.z}
+                  stroke={marker.kind === 'waist' ? '#2d9bf0' : '#9013fe'}
+                  strokeDasharray={marker.kind === 'waist' ? '2 3' : '4 4'}
+                  label={{
+                    value: marker.label,
+                    position: marker.kind === 'waist' ? 'insideBottom' : 'insideTop',
+                    fill: marker.kind === 'waist' ? '#2d9bf0' : '#6b1fc9',
+                    fontSize: 11,
+                  }}
+                />
+              ))}
+
+              {cavityOverlapMarkers.map((marker, index) => (
+                <ReferenceLine
+                  key={`cavity-overlap-${index}`}
+                  x={marker.z}
+                  stroke="transparent"
+                  label={{
+                    value: `mode match ${marker.label}`,
+                    position: 'top',
+                    fill: marker.good ? '#1a7f37' : '#c0392b',
+                    fontSize: 11,
+                    fontWeight: 700,
+                  }}
                 />
               ))}
 

@@ -18,6 +18,7 @@ import type {
   FlatMirrorComponent,
 } from './schema';
 import { isWithinAxisCapture, snapPointToAxis, transverseOffsetToAxis } from './axisCapture';
+import { gridSpacingMm } from './snapToGrid';
 
 /**
  * Resolve the beam path from the source component onwards.
@@ -167,7 +168,7 @@ function traceBeamPath(
       const newDir = reflectDirection(currentDir, mirror.orientation);
       currentDir = newDir;
       currentPos = hitPoint;
-    } else if (component.kind === 'lens_thin' || component.kind === 'cavity_fp') {
+    } else if (component.kind === 'lens_thin' || component.kind === 'cavity_fp' || component.kind === 'target') {
       // Pass through: direction unchanged
       currentPos = hitPoint;
       // direction stays the same
@@ -331,15 +332,24 @@ function rayIntersectsComponent(
   const componentPos = component.position;
   const COMPONENT_RADIUS = 10; // mm (approximate size for hit-test)
 
+  // Cavities are large, two-mirror objects, not simple points. Rather than the
+  // small point-like COMPONENT_RADIUS (and the table's generic, user-tunable
+  // axisCaptureThreshold, which could be set arbitrarily large), a cavity is
+  // only considered part of the beam path if it sits within one grid hole of
+  // the beam axis - a fixed, physically-meaningful tolerance.
+  const isCavity = component.kind === 'cavity_fp';
+  const captureRadiusMm = isCavity ? gridSpacingMm(table.gridStandard) : COMPONENT_RADIUS;
+  const captureThresholdMm = isCavity ? gridSpacingMm(table.gridStandard) : table.axisCaptureThreshold;
+
   let intersectsAxis = false;
   let distance = Infinity;
   let hitPoint = rayOrigin;
 
-  // Ray travels along cardinal axis; check if it passes within COMPONENT_RADIUS of the component center
+  // Ray travels along cardinal axis; check if it passes within captureRadiusMm of the component
   switch (direction) {
     case 'right':
       // Ray is at (y = rayOrigin.y), moving in +x
-      if (Math.abs(componentPos.y - rayOrigin.y) <= COMPONENT_RADIUS) {
+      if (Math.abs(componentPos.y - rayOrigin.y) <= captureRadiusMm) {
         const d = componentPos.x - rayOrigin.x;
         if (d > 0) {
           distance = d;
@@ -350,7 +360,7 @@ function rayIntersectsComponent(
       break;
     case 'left':
       // Ray is at (y = rayOrigin.y), moving in -x
-      if (Math.abs(componentPos.y - rayOrigin.y) <= COMPONENT_RADIUS) {
+      if (Math.abs(componentPos.y - rayOrigin.y) <= captureRadiusMm) {
         const d = rayOrigin.x - componentPos.x;
         if (d > 0) {
           distance = d;
@@ -361,7 +371,7 @@ function rayIntersectsComponent(
       break;
     case 'down':
       // Ray is at (x = rayOrigin.x), moving in +y
-      if (Math.abs(componentPos.x - rayOrigin.x) <= COMPONENT_RADIUS) {
+      if (Math.abs(componentPos.x - rayOrigin.x) <= captureRadiusMm) {
         const d = componentPos.y - rayOrigin.y;
         if (d > 0) {
           distance = d;
@@ -372,7 +382,7 @@ function rayIntersectsComponent(
       break;
     case 'up':
       // Ray is at (x = rayOrigin.x), moving in -y
-      if (Math.abs(componentPos.x - rayOrigin.x) <= COMPONENT_RADIUS) {
+      if (Math.abs(componentPos.x - rayOrigin.x) <= captureRadiusMm) {
         const d = rayOrigin.y - componentPos.y;
         if (d > 0) {
           distance = d;
@@ -386,7 +396,7 @@ function rayIntersectsComponent(
   // Check axis capture: if component is off-axis but within threshold, snap it to axis
   if (intersectsAxis && !isComponentOnAxis(rayOrigin, direction, componentPos, table)) {
     const offset = transverseOffsetToAxis(componentPos, rayOrigin, direction); // Compute transverse offset
-    if (Math.abs(offset) <= table.axisCaptureThreshold) {
+    if (isWithinAxisCapture(offset, captureThresholdMm)) {
       // Component is within capture range; snap hit point to beam axis
       hitPoint = snapPointToAxis(hitPoint, rayOrigin, direction);
     } else {

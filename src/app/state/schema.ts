@@ -2,7 +2,7 @@ export type CardinalDirection = 'right' | 'left' | 'up' | 'down';
 
 export type MirrorOrientation = 45 | 135 | 225 | 315;
 
-export type ComponentKind = 'source' | 'mirror_flat' | 'lens_thin' | 'cavity_fp';
+export type ComponentKind = 'source' | 'mirror_flat' | 'lens_thin' | 'cavity_fp' | 'target';
 
 export type GridStandard = 'metric' | 'imperial';
 
@@ -61,11 +61,22 @@ export interface CavityFPComponent extends BaseComponent {
   eigenmode: CavityEigenmode | null;
 }
 
+/**
+ * A pure mode-matching target: marks a desired waist size at a position
+ * along the beam path. Unlike a cavity, it does not affect propagation -
+ * it is purely a reference point for computing mode overlap.
+ */
+export interface TargetComponent extends BaseComponent {
+  kind: 'target';
+  waistRadius: number;
+}
+
 export type OpticalComponent =
   | SourceComponent
   | FlatMirrorComponent
   | LensThinComponent
-  | CavityFPComponent;
+  | CavityFPComponent
+  | TargetComponent;
 
 export interface TableConfig {
   width: number;
@@ -104,17 +115,22 @@ export interface PropagationResult {
   waists: PropagationWaist[];
   qAtComponent: Record<string, ComplexNumber>;
   qFinal: ComplexNumber;
+  /**
+   * Mode overlap (0-1) between the incoming beam and each cavity's eigenmode,
+   * measured at the input mirror - independent of whether the beam actually
+   * coupled (i.e. not clamped to 1 once past the coupling threshold).
+   */
+  cavityOverlap: Record<string, number>;
 }
 
 export type TargetMode =
   | {
-      kind: 'manual';
-      waistRadius: number;
-      waistZ: number;
-    }
-  | {
       kind: 'cavity';
       cavityComponentId: string;
+    }
+  | {
+      kind: 'target';
+      targetComponentId: string;
     };
 
 export interface OptimiserSolution {

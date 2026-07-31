@@ -5,6 +5,7 @@ import type {
   OpticalComponent,
   Point2d,
   SourceComponent,
+  TargetComponent,
 } from './schema';
 import type { AppState, TableConfig } from './schema';
 
@@ -84,6 +85,20 @@ export function createCavityFPComponent(
     r2: 100,
     direction: 'right',
     eigenmode: null,
+  };
+}
+
+export function createTargetComponent(
+  components: Record<string, OpticalComponent> = {},
+  position: Point2d = { x: 0, y: 0 },
+): TargetComponent {
+  return {
+    id: buildComponentId('target'),
+    kind: 'target',
+    position,
+    locked: false,
+    label: nextLabel('T', countComponentsByKind(components, 'target')),
+    waistRadius: 0.4,
   };
 }
 

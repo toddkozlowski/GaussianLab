@@ -5,8 +5,9 @@ import {
   createFlatMirrorComponent,
   createLensThinComponent,
   createSourceComponent,
+  createTargetComponent,
 } from '../state/componentFactories';
-import type { AppState, CardinalDirection, OpticalComponent, Point2d } from '../state/schema';
+import type { AppState, CardinalDirection, OpticalComponent, Point2d, TargetMode } from '../state/schema';
 import { computeDangerousPairs, getComponentPathPosition } from '../state';
 import { handleCaretStepKeyDown } from '../../ui/shared/numericCaretStep';
 import chevronDownIcon from '../../../icons/circle-chevron-down.svg';
@@ -24,13 +25,16 @@ interface SidebarProps {
 
 export function Sidebar({ showTargetProfile, onToggleTargetProfile }: SidebarProps) {
   const { state, dispatch, runSolver, previewSolution, applySolution } = useAppStore();
-  const [manualWaistRadiusUm, setManualWaistRadiusUm] = useState(400);
-  const [manualWaistZ, setManualWaistZ] = useState(300);
-  const [selectedCavityId, setSelectedCavityId] = useState<string>('');
+  const [selectedTargetId, setSelectedTargetId] = useState<string>('');
   const [modeMatchingOpen, setModeMatchingOpen] = useState(false);
 
-  const cavities = useMemo(
-    () => Object.values(state.components).filter((component) => component.kind === 'cavity_fp'),
+  // Both cavities and target objects can serve as a mode-matching target,
+  // and both are valid selections for the auto-optimizer.
+  const targetableComponents = useMemo(
+    () =>
+      Object.values(state.components).filter(
+        (component) => component.kind === 'cavity_fp' || component.kind === 'target'
+      ),
     [state.components]
   );
 
@@ -74,32 +78,28 @@ export function Sidebar({ showTargetProfile, onToggleTargetProfile }: SidebarPro
     dispatch({ type: 'SET_SELECTED_COMPONENT', payload: { componentId: cavity.id } });
   };
 
-  const setManualTarget = () => {
-    dispatch({
-      type: 'SET_TARGET_MODE',
-      payload: {
-        targetMode: {
-          kind: 'manual',
-          waistRadius: Math.max(1, manualWaistRadiusUm) / 1000,
-          waistZ: Math.max(0, manualWaistZ),
-        },
-      },
-    });
+  const addTarget = () => {
+    const target = createTargetComponent(state.components, defaultPlacement);
+    dispatch({ type: 'ADD_COMPONENT', payload: target });
+    dispatch({ type: 'SET_SELECTED_COMPONENT', payload: { componentId: target.id } });
   };
 
-  const setCavityTarget = () => {
-    if (!selectedCavityId) {
+  const setSelectedAsTarget = () => {
+    const component = state.components[selectedTargetId];
+    if (!component) {
       return;
     }
-    dispatch({
-      type: 'SET_TARGET_MODE',
-      payload: {
-        targetMode: {
-          kind: 'cavity',
-          cavityComponentId: selectedCavityId,
-        },
-      },
-    });
+
+    let targetMode: TargetMode;
+    if (component.kind === 'cavity_fp') {
+      targetMode = { kind: 'cavity', cavityComponentId: component.id };
+    } else if (component.kind === 'target') {
+      targetMode = { kind: 'target', targetComponentId: component.id };
+    } else {
+      return;
+    }
+
+    dispatch({ type: 'SET_TARGET_MODE', payload: { targetMode } });
   };
 
   return (
@@ -124,6 +124,7 @@ export function Sidebar({ showTargetProfile, onToggleTargetProfile }: SidebarPro
             <button type="button" onClick={addMirror}>+ Mirror</button>
             <button type="button" onClick={addLens}>+ Lens</button>
             <button type="button" onClick={addCavity}>+ Cavity</button>
+            <button type="button" onClick={addTarget}>+ Target</button>
           </div>
           <div className="component-table-wrap">
             <table className="component-table">
@@ -246,47 +247,23 @@ export function Sidebar({ showTargetProfile, onToggleTargetProfile }: SidebarPro
         {modeMatchingOpen && (
           <div className="panel-body">
             <div className="stack">
-              <div className="mode-matching-inline-row">
-                <label className="mode-matching-compact-field">
-                  <span>Waist r (um)</span>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    value={manualWaistRadiusUm}
-                    min={1}
-                    step={1}
-                    onChange={(event) => setManualWaistRadiusUm(Number(event.target.value))}
-                    onKeyDown={(event) => handleCaretStepKeyDown(event, (value) => setManualWaistRadiusUm(Math.max(1, value)))}
-                  />
-                </label>
-                <label className="mode-matching-compact-field">
-                  <span>Waist z (mm)</span>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    value={formatFixed3(manualWaistZ)}
-                    min={0}
-                    step={10}
-                    onChange={(event) => setManualWaistZ(Number(event.target.value))}
-                    onKeyDown={(event) => handleCaretStepKeyDown(event, (value) => setManualWaistZ(Math.max(0, value)))}
-                  />
-                </label>
-              </div>
-              <button type="button" onClick={setManualTarget}>Use manual target</button>
-
               <label>
-                Cavity target
+                Target
                 <select
-                  value={selectedCavityId}
-                  onChange={(event) => setSelectedCavityId(event.target.value)}
+                  value={selectedTargetId}
+                  onChange={(event) => setSelectedTargetId(event.target.value)}
                 >
-                  <option value="">Select cavity...</option>
-                  {cavities.map((cavity) => (
-                    <option key={cavity.id} value={cavity.id}>{cavity.label}</option>
+                  <option value="">Select cavity or target...</option>
+                  {targetableComponents.map((component) => (
+                    <option key={component.id} value={component.id}>
+                      {component.label} ({component.kind === 'cavity_fp' ? 'cavity' : 'target'})
+                    </option>
                   ))}
                 </select>
               </label>
-              <button type="button" onClick={setCavityTarget} disabled={!selectedCavityId}>Use cavity target</button>
+              <button type="button" onClick={setSelectedAsTarget} disabled={!selectedTargetId}>
+                Use as mode-matching target
+              </button>
 
               <label className="mode-matching-inline-toggle">
                 <span>Show target mode</span>
@@ -421,6 +398,35 @@ function renderPropertyCell(
     );
   }
 
+  if (component.kind === 'target') {
+    return (
+      <input
+        type="text"
+        inputMode="decimal"
+        value={Math.round(component.waistRadius * 1000)}
+        onChange={(event) => {
+          event.stopPropagation();
+          const value = Number(event.target.value);
+          if (Number.isFinite(value)) {
+            dispatch({
+              type: 'UPDATE_COMPONENT',
+              payload: { id: component.id, updates: { waistRadius: Math.max(1, value) / 1000 } },
+            });
+          }
+        }}
+        onKeyDown={(event) =>
+          handleCaretStepKeyDown(event, (value) => {
+            event.stopPropagation();
+            dispatch({
+              type: 'UPDATE_COMPONENT',
+              payload: { id: component.id, updates: { waistRadius: Math.max(1, value) / 1000 } },
+            });
+          })
+        }
+      />
+    );
+  }
+
   return (
     <input
       type="text"
@@ -453,6 +459,7 @@ function shortKind(kind: OpticalComponent['kind']) {
   if (kind === 'source') return 'src';
   if (kind === 'mirror_flat') return 'mir';
   if (kind === 'lens_thin') return 'lens';
+  if (kind === 'target') return 'tgt';
   return 'cav';
 }
 

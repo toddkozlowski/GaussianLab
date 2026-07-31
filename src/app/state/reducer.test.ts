@@ -151,18 +151,16 @@ describe('appStateReducer', () => {
       type: 'SET_TARGET_MODE',
       payload: {
         targetMode: {
-          kind: 'manual',
-          waistRadius: 2,
-          waistZ: 500,
+          kind: 'target',
+          targetComponentId: 'target-1',
         },
       },
     };
 
     const newState = appStateReducer(DEFAULT_APP_STATE, action);
-    expect(newState.targetMode?.kind).toBe('manual');
-    if (newState.targetMode?.kind === 'manual') {
-      expect(newState.targetMode.waistRadius).toBe(2);
-      expect(newState.targetMode.waistZ).toBe(500);
+    expect(newState.targetMode?.kind).toBe('target');
+    if (newState.targetMode?.kind === 'target') {
+      expect(newState.targetMode.targetComponentId).toBe('target-1');
     }
   });
 
@@ -170,9 +168,8 @@ describe('appStateReducer', () => {
     const state = {
       ...DEFAULT_APP_STATE,
       targetMode: {
-        kind: 'manual' as const,
-        waistRadius: 2,
-        waistZ: 500,
+        kind: 'target' as const,
+        targetComponentId: 'target-1',
       },
     };
 
@@ -270,9 +267,8 @@ describe('appStateReducer', () => {
       components: { [source.id]: source, [lens.id]: lens },
       selectedComponentId: lens.id,
       targetMode: {
-        kind: 'manual' as const,
-        waistRadius: 2,
-        waistZ: 500,
+        kind: 'target' as const,
+        targetComponentId: 'target-1',
       },
     };
 

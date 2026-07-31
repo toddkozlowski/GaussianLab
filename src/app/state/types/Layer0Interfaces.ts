@@ -85,7 +85,7 @@ export interface PropagationEngine {
    * beam parameter at each component.
    *
    * @param input PropagationEngineInput
-   * @returns PropagationResult with profile, waists, qAtComponent, qFinal
+   * @returns PropagationResult with profile, waists, qAtComponent, qFinal, cavityOverlap
    */
   propagateBeam(input: PropagationEngineInput): PropagationResult;
 }

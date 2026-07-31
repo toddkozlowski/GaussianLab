@@ -10,9 +10,22 @@ function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value));
 }
 
-export function getOutputBeamWaist(state: AppState): (BeamWaist & { wavelengthNm: number }) | null {
+/**
+ * Derive the beam's own (natural) waist size and position from its
+ * q-parameter at the point where it reaches `componentId`, using the
+ * component's known z-position along the unfolded path.
+ */
+export function getBeamWaistAtComponent(
+  state: AppState,
+  componentId: string,
+): (BeamWaist & { wavelengthNm: number }) | null {
   const result = state.propagationResult;
-  if (!result || result.profile.length === 0) {
+  if (!result) {
+    return null;
+  }
+
+  const q = result.qAtComponent[componentId];
+  if (!q || q.im <= 0) {
     return null;
   }
 
@@ -21,28 +34,24 @@ export function getOutputBeamWaist(state: AppState): (BeamWaist & { wavelengthNm
     return null;
   }
 
-  if (result.qFinal.im <= 0) {
-    return null;
-  }
-
   const wavelengthNm = source.wavelength;
   const wavelengthMm = wavelengthNm * 1e-6;
-  const w0Mm = Math.sqrt((wavelengthMm * result.qFinal.im) / Math.PI);
+  const w0Mm = Math.sqrt((wavelengthMm * q.im) / Math.PI);
   if (!Number.isFinite(w0Mm) || w0Mm <= 0) {
     return null;
   }
 
-  const zEndMm = result.profile[result.profile.length - 1].z;
-  const z0Mm = zEndMm - result.qFinal.re;
+  const encounter = state.beamPath?.segments.find((segment) => segment.terminatedByComponentId === componentId);
+  if (!encounter) {
+    return null;
+  }
+
+  const z0Mm = encounter.zEnd - q.re;
   if (!Number.isFinite(z0Mm)) {
     return null;
   }
 
-  return {
-    w0Mm,
-    z0Mm,
-    wavelengthNm,
-  };
+  return { w0Mm, z0Mm, wavelengthNm };
 }
 
 export function getTargetBeamWaist(state: AppState): BeamWaist | null {
@@ -50,10 +59,22 @@ export function getTargetBeamWaist(state: AppState): BeamWaist | null {
     return null;
   }
 
-  if (state.targetMode.kind === 'manual') {
+  if (state.targetMode.kind === 'target') {
+    const target = state.components[state.targetMode.targetComponentId];
+    if (!target || target.kind !== 'target') {
+      return null;
+    }
+
+    const encounter = state.beamPath?.segments.find((segment) => segment.terminatedByComponentId === target.id);
+    if (!encounter) {
+      return null;
+    }
+
+    // The target object's own position along the unfolded path IS the
+    // desired waist location - it does not offset like a cavity's eigenmode.
     return {
-      w0Mm: state.targetMode.waistRadius,
-      z0Mm: state.targetMode.waistZ,
+      w0Mm: target.waistRadius,
+      z0Mm: encounter.zEnd,
     };
   }
 
@@ -67,7 +88,9 @@ export function getTargetBeamWaist(state: AppState): BeamWaist | null {
     return null;
   }
 
-  const m1ZMm = encounter.zEnd - cavity.length / 2;
+  // The beam path treats the cavity's stored position as its input mirror
+  // (M1), so encounter.zEnd already is M1's z-position.
+  const m1ZMm = encounter.zEnd;
 
   return {
     w0Mm: cavity.eigenmode.waistRadius,
@@ -76,19 +99,37 @@ export function getTargetBeamWaist(state: AppState): BeamWaist | null {
 }
 
 export function computeLiveModeOverlap(state: AppState): number | null {
-  const output = getOutputBeamWaist(state);
-  const target = getTargetBeamWaist(state);
-  if (!output || !target) {
-    return null;
+  // For a cavity target, the propagated beam downstream of the cavity is
+  // *forced* onto the cavity's own eigenmode once coupling succeeds - so
+  // comparing that forced output against the (identical) target mode would
+  // trivially always read 100%. Instead, use the overlap actually measured
+  // between the incoming beam and the cavity eigenmode at the input mirror,
+  // which the propagation engine already computes and reports per-cavity.
+  if (state.targetMode?.kind === 'cavity') {
+    const overlap = state.propagationResult?.cavityOverlap?.[state.targetMode.cavityComponentId];
+    return typeof overlap === 'number' ? clamp01(overlap) : null;
   }
 
-  return clamp01(
-    calculateModeOverlapFromWaistParams(
-      output.w0Mm,
-      output.z0Mm,
-      target.w0Mm,
-      target.z0Mm,
-      output.wavelengthNm,
-    ),
-  );
+  if (state.targetMode?.kind === 'target') {
+    // A target object doesn't modify the beam, so compare the beam's own
+    // natural waist right where it reaches the target - not the final
+    // output, which could differ if anything sits further downstream.
+    const output = getBeamWaistAtComponent(state, state.targetMode.targetComponentId);
+    const target = getTargetBeamWaist(state);
+    if (!output || !target) {
+      return null;
+    }
+
+    return clamp01(
+      calculateModeOverlapFromWaistParams(
+        output.w0Mm,
+        output.z0Mm,
+        target.w0Mm,
+        target.z0Mm,
+        output.wavelengthNm,
+      ),
+    );
+  }
+
+  return null;
 }

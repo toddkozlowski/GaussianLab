@@ -23,9 +23,10 @@ import { SourceRenderer } from './components/SourceRenderer';
 import { MirrorRenderer } from './components/MirrorRenderer';
 import { LensRenderer } from './components/LensRenderer';
 import { CavityRenderer } from './components/CavityRenderer';
+import { TargetRenderer } from './components/TargetRenderer';
 import { GridOverlay } from './GridOverlay';
 import { BeamCorridorOverlay } from './BeamCorridorOverlay';
-import { snapPointToGrid } from '../../app/state/snapToGrid';
+import { snapPointToGrid, gridSpacingMm } from '../../app/state/snapToGrid';
 import { handleCaretStepKeyDown } from '../shared/numericCaretStep';
 import lockIcon from '../../../icons/lock.svg';
 import lockOpenIcon from '../../../icons/lock-open.svg';
@@ -110,13 +111,19 @@ export const Canvas: React.FC<CanvasProps> = ({
     [config.height, config.width]
   );
 
+  // Finds the beam segment nearest to `point` and, only if `point` is within
+  // `thresholdMm` of that segment's axis (transversely), returns the point
+  // projected onto the axis. Otherwise returns null: the object is too far
+  // from the beam to be considered part of the path, and must keep its own
+  // dragged-to position rather than being forced back onto the beam.
   const nearestBeamAxisSnap = React.useCallback(
-    (point: Point2d): Point2d => {
+    (point: Point2d, thresholdMm: number): Point2d | null => {
       if (!beamPath || !beamPath.isValid || beamPath.segments.length === 0) {
-        return point;
+        return null;
       }
 
-      let best = point;
+      let best: Point2d | null = null;
+      let bestTransverse = Number.POSITIVE_INFINITY;
       let bestScore = Number.POSITIVE_INFINITY;
 
       for (const segment of beamPath.segments) {
@@ -135,8 +142,13 @@ export const Canvas: React.FC<CanvasProps> = ({
 
         if (score < bestScore) {
           bestScore = score;
+          bestTransverse = transverse;
           best = snapped;
         }
+      }
+
+      if (best === null || bestTransverse > thresholdMm) {
+        return null;
       }
 
       return best;
@@ -154,13 +166,23 @@ export const Canvas: React.FC<CanvasProps> = ({
 
       if (component.kind === 'source' || component.kind === 'mirror_flat') {
         next = snapPointToGrid(next, config.gridStandard);
-      } else if (component.kind === 'lens_thin' || component.kind === 'cavity_fp') {
-        next = nearestBeamAxisSnap(next);
+      } else if (component.kind === 'lens_thin' || component.kind === 'cavity_fp' || component.kind === 'target') {
+        // Only snap onto the beam axis while the drag stays within the same
+        // capture distance the physics engine uses to decide whether this
+        // object is actually part of the beam path (beamPathResolver.ts).
+        // Beyond that, the object keeps its own dragged-to position and
+        // drops out of the beam entirely.
+        const thresholdMm =
+          component.kind === 'cavity_fp' ? gridSpacingMm(config.gridStandard) : config.axisCaptureThreshold;
+        const snapped = nearestBeamAxisSnap(next, thresholdMm);
+        if (snapped) {
+          next = snapped;
+        }
       }
 
       return clampToTableCenter(next);
     },
-    [clampToTableCenter, config.gridStandard, config.snapToGrid, nearestBeamAxisSnap]
+    [clampToTableCenter, config.axisCaptureThreshold, config.gridStandard, config.snapToGrid, nearestBeamAxisSnap]
   );
 
   const handleComponentDragEnd = (componentId: string, newPos: Point2d) => {
@@ -415,6 +437,16 @@ export const Canvas: React.FC<CanvasProps> = ({
                     isSelected={state.selectedComponentId === component.id}
                   />
                 )}
+                {component.kind === 'target' && (
+                  <TargetRenderer
+                    component={component}
+                    mmToPx={mmToPx}
+                    onDragEnd={handleComponentDragEnd}
+                    onSelect={selectComponent}
+                    isDraggable={!component.locked}
+                    isSelected={state.selectedComponentId === component.id}
+                  />
+                )}
               </React.Fragment>
             ))}
           </Group>
@@ -617,6 +649,36 @@ export const Canvas: React.FC<CanvasProps> = ({
                       dispatch({
                         type: 'UPDATE_COMPONENT',
                         payload: { id: selected.id, updates: { focalLength: round3(value) } },
+                      });
+                    })
+                  }
+                />
+              </label>
+            </div>
+          )}
+
+          {selected.kind === 'target' && (
+            <div className="canvas-source-editor">
+              <label>
+                Waist r (um)
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={Math.round(selected.waistRadius * 1000)}
+                  onChange={(event) => {
+                    const value = Number(event.target.value);
+                    if (Number.isFinite(value)) {
+                      dispatch({
+                        type: 'UPDATE_COMPONENT',
+                        payload: { id: selected.id, updates: { waistRadius: Math.max(1, value) / 1000 } },
+                      });
+                    }
+                  }}
+                  onKeyDown={(event) =>
+                    handleCaretStepKeyDown(event, (value) => {
+                      dispatch({
+                        type: 'UPDATE_COMPONENT',
+                        payload: { id: selected.id, updates: { waistRadius: Math.max(1, value) / 1000 } },
                       });
                     })
                   }

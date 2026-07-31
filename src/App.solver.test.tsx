@@ -1,18 +1,25 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import App from './App';
 
 describe('Layer 5 solver workflow', () => {
-  it('supports manual target solve and solution preview/apply flow', async () => {
+  it('supports target-object solve and solution preview/apply flow', async () => {
     render(<App />);
 
     // Ensure at least one movable lens exists for optimization.
     fireEvent.click(screen.getByRole('button', { name: '+ Lens' }));
 
+    // Add a target object (placed on the beam by default) to mode-match against.
+    fireEvent.click(screen.getByRole('button', { name: '+ Target' }));
+
     // Expand mode-matching controls (collapsed by default).
     fireEvent.click(screen.getByRole('button', { name: 'Expand mode matching' }));
 
-    // Configure manual target and run solver.
-    fireEvent.click(screen.getByRole('button', { name: 'Use manual target' }));
+    // Select the target object and configure it as the mode-matching target.
+    const targetSelect = screen.getByRole('combobox');
+    const targetOption = within(targetSelect).getByText(/\(target\)/);
+    fireEvent.change(targetSelect, { target: { value: (targetOption as HTMLOptionElement).value } });
+    fireEvent.click(screen.getByRole('button', { name: 'Use as mode-matching target' }));
+
     fireEvent.click(screen.getByRole('button', { name: 'Run optimizer' }));
 
     // Solver should produce at least one solution card with Preview/Apply actions.

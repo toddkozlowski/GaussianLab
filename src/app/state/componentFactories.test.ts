@@ -4,6 +4,7 @@ import {
   createFlatMirrorComponent,
   createLensThinComponent,
   createSourceComponent,
+  createTargetComponent,
 } from './componentFactories';
 import type { OpticalComponent } from './schema';
 
@@ -38,5 +39,17 @@ describe('componentFactories', () => {
     expect(cavity.length).toBe(100);
     expect(cavity.r1).toBe(100);
     expect(cavity.r2).toBe(100);
+  });
+
+  it('creates target with expected defaults and incremental label', () => {
+    const components: Record<string, OpticalComponent> = {};
+    const firstTarget = createTargetComponent(components, { x: 500, y: 200 });
+    components[firstTarget.id] = firstTarget;
+    const secondTarget = createTargetComponent(components, { x: 600, y: 200 });
+
+    expect(firstTarget.kind).toBe('target');
+    expect(firstTarget.label).toBe('T1');
+    expect(firstTarget.waistRadius).toBeGreaterThan(0);
+    expect(secondTarget.label).toBe('T2');
   });
 });

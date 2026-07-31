@@ -1,6 +1,12 @@
 import { describe, it, expect } from 'vitest';
 import { resolveBeamPath } from './beamPathResolver';
-import { createSourceComponent, createFlatMirrorComponent, createLensThinComponent } from './componentFactories';
+import {
+  createSourceComponent,
+  createFlatMirrorComponent,
+  createLensThinComponent,
+  createCavityFPComponent,
+  createTargetComponent,
+} from './componentFactories';
 import { DEFAULT_APP_STATE } from './defaultState';
 import type { AppState } from './schema';
 
@@ -285,5 +291,72 @@ describe('beamPathResolver', () => {
     } else {
       expect(path!.orderedComponentIds).toContain(lens.id);
     }
+  });
+
+  it('captures a cavity within one grid hole (25mm) off-axis, regardless of the table axisCaptureThreshold', () => {
+    const source = createSourceComponent();
+    source.position = { x: 100, y: 300 };
+    source.direction = 'right';
+
+    const cavity = createCavityFPComponent({}, { x: 300, y: 320 }); // 20mm off-axis
+    cavity.direction = 'right';
+
+    const state: AppState = {
+      ...DEFAULT_APP_STATE,
+      sourceId: source.id,
+      components: { [source.id]: source, [cavity.id]: cavity },
+      table: {
+        ...DEFAULT_APP_STATE.table,
+        axisCaptureThreshold: 5, // much stricter than the cavity's own grid-hole rule
+      },
+    };
+
+    const path = resolveBeamPath(state);
+    expect(path).not.toBeNull();
+    expect(path!.orderedComponentIds).toContain(cavity.id);
+  });
+
+  it('passes straight through a target object without affecting the beam', () => {
+    const source = createSourceComponent();
+    source.position = { x: 100, y: 300 };
+    source.direction = 'right';
+
+    const target = createTargetComponent({}, { x: 300, y: 300 }); // on-axis
+
+    const state: AppState = {
+      ...DEFAULT_APP_STATE,
+      sourceId: source.id,
+      components: { [source.id]: source, [target.id]: target },
+    };
+
+    const path = resolveBeamPath(state);
+    expect(path).not.toBeNull();
+    expect(path!.isValid).toBe(true);
+    expect(path!.orderedComponentIds).toEqual([target.id]);
+    expect(path!.segments).toHaveLength(2); // source -> target, target -> boundary
+    expect(path!.segments[1].direction).toBe('right'); // direction unchanged
+  });
+
+  it('ignores a cavity dragged beyond one grid hole (25mm) off-axis, even if axisCaptureThreshold is set larger', () => {
+    const source = createSourceComponent();
+    source.position = { x: 100, y: 300 };
+    source.direction = 'right';
+
+    const cavity = createCavityFPComponent({}, { x: 300, y: 340 }); // 40mm off-axis
+    cavity.direction = 'right';
+
+    const state: AppState = {
+      ...DEFAULT_APP_STATE,
+      sourceId: source.id,
+      components: { [source.id]: source, [cavity.id]: cavity },
+      table: {
+        ...DEFAULT_APP_STATE.table,
+        axisCaptureThreshold: 100, // generous table-wide setting the cavity should NOT inherit
+      },
+    };
+
+    const path = resolveBeamPath(state);
+    expect(path).not.toBeNull();
+    expect(path!.orderedComponentIds).not.toContain(cavity.id);
   });
 });

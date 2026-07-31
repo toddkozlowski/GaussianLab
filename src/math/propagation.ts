@@ -8,7 +8,6 @@
 import {
   propagateQ,
   rayleighRange,
-  waistFromQ,
 } from './qParameter';
 import { type Complex } from './complex';
 import type {
@@ -16,7 +15,7 @@ import type {
   PropagationEngineInput,
 } from '../app/state/types/Layer0Interfaces';
 import type { PropagationResult, PropagationWaist, ComplexNumber } from '../app/state/schema';
-import { calculateModeOverlap } from './overlap';
+import { calculateModeOverlapFromWaistParams } from './overlap';
 
 /**
  * Propagation engine: traces Gaussian beam through optical system
@@ -41,9 +40,18 @@ export class ConcreteBeamPropagationEngine implements PropagationEngine {
     const profile: Array<{ z: number; w: number }> = []; // in mm
     const waists: PropagationWaist[] = [];
     const qAtComponent: Record<string, ComplexNumber> = {};
+    const cavityOverlap: Record<string, number> = {};
 
     // Propagate through each segment. Each segment models free-space travel only.
     // Component transforms happen at the segment boundary after sampling.
+    //
+    // A cavity's stored position is its input mirror (M1) - the plane where
+    // an incoming beam physically first meets the cavity - so the segment
+    // ending at a cavity is pure free space up to M1, and mode-matching is
+    // decided exactly at that boundary. The segment that follows (from M1 to
+    // whatever is next) naturally spans the cavity's interior and its
+    // transmitted output, since the cavity's on-canvas footprint already
+    // occupies that physical length.
     for (const segment of segments) {
       const { distance, componentId } = segment;
       const distanceM = distance / 1000;
@@ -93,27 +101,36 @@ export class ConcreteBeamPropagationEngine implements PropagationEngine {
           });
         }
       } else if (segment.componentKind === 'cavity_fp' && segment.cavityEigenmode?.isStable) {
-        const cavityQAtBoundary = cavityEigenmodeAtBoundary(
-          segment.cavityEigenmode,
-          wavelengthMetres,
-          segment.cavityLengthMm
-        );
-        const beamAtInput = beamFromQ(qAtBoundary, wavelengthMetres);
-        const cavityAtInput = beamFromQ(cavityQAtBoundary, wavelengthMetres);
+        const cavityQAtM1 = cavityEigenmodeAtM1(segment.cavityEigenmode, wavelengthMetres);
 
-        const overlap = calculateModeOverlap(
-          beamAtInput.radius,
-          beamAtInput.waistPosition,
-          cavityAtInput.radius,
-          cavityAtInput.waistPosition,
-          wavelengthMetres
+        // Mode overlap uses the same rigorous, reference-plane-independent
+        // formula shown to the user as "mode matching" (see modeMetrics.ts),
+        // evaluated at M1 where the beam actually meets the cavity. This
+        // keeps the accept/reject decision consistent with the displayed
+        // percentage, so a >99% match never gets rejected here.
+        const beamWaistRadiusM = Math.sqrt((wavelengthMetres * qAtBoundary.im) / Math.PI);
+        const beamWaistPositionFromM1M = -qAtBoundary.re;
+        const cavityWaistRadiusM = Math.max(1e-9, segment.cavityEigenmode.waistRadius / 1000);
+        const cavityWaistPositionFromM1M = -cavityQAtM1.re;
+
+        const overlap = calculateModeOverlapFromWaistParams(
+          beamWaistRadiusM * 1000,
+          beamWaistPositionFromM1M * 1000,
+          cavityWaistRadiusM * 1000,
+          cavityWaistPositionFromM1M * 1000,
+          wavelengthMetres * 1e9
         );
+
+        if (componentId) {
+          cavityOverlap[componentId] = overlap;
+        }
 
         const threshold = segment.cavityCouplingThreshold ?? 0.25;
         if (overlap >= threshold) {
-          // Beam path geometry meets a cavity at its stored center position.
-          // Switch onto the cavity eigenmode referenced at that same plane.
-          qAfterBoundary = cavityQAtBoundary;
+          // Beam couples into the cavity at M1. From here through the
+          // cavity's interior and beyond M2, the beam follows the cavity
+          // eigenmode, not the incoming beam.
+          qAfterBoundary = cavityQAtM1;
         } else {
           terminateAfterBoundary = true;
         }
@@ -148,6 +165,7 @@ export class ConcreteBeamPropagationEngine implements PropagationEngine {
       profile,
       waists: uniqueWaists,
       qAtComponent,
+      cavityOverlap,
       qFinal: {
         re: qCurrent.re * 1000,
         im: qCurrent.im * 1000,
@@ -171,25 +189,19 @@ function beamRadiusFromQ(q: Complex, wavelengthMetres: number): number {
   return Math.sqrt(wSq);
 }
 
-function beamFromQ(q: Complex, wavelengthMetres: number): { radius: number; waistPosition: number } {
-  const { waistPosition } = waistFromQ(q, wavelengthMetres);
-  return {
-    radius: beamRadiusFromQ(q, wavelengthMetres),
-    waistPosition,
-  };
-}
-
-function cavityEigenmodeAtBoundary(
+/**
+ * The cavity eigenmode's q-parameter at the input mirror (M1), the plane
+ * where an incoming beam physically first meets the cavity.
+ */
+function cavityEigenmodeAtM1(
   eigenmode: { waistRadius: number; waistPositionFromM1: number },
-  wavelengthMetres: number,
-  cavityLengthMm?: number
+  wavelengthMetres: number
 ): Complex {
   const cavityWaistRadiusM = Math.max(1e-9, eigenmode.waistRadius / 1000);
-  const cavityLengthM = Math.max(0, (cavityLengthMm ?? 0) / 1000);
-  const cavityWaistPositionAtBoundaryM = eigenmode.waistPositionFromM1 / 1000 - cavityLengthM / 2;
+  const waistPositionFromM1M = eigenmode.waistPositionFromM1 / 1000;
   const zR = rayleighRange(cavityWaistRadiusM, wavelengthMetres);
   return {
-    re: -cavityWaistPositionAtBoundaryM,
+    re: -waistPositionFromM1M,
     im: zR,
   };
 }

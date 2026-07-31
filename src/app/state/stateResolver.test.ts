@@ -51,6 +51,7 @@ describe('stateResolver', () => {
         waists: [],
         qAtComponent: {},
         qFinal: { re: 0, im: 1e-6 },
+        cavityOverlap: {},
       }),
     };
 
@@ -196,6 +197,7 @@ describe('stateResolver', () => {
         waists: [],
         qAtComponent: {},
         qFinal: { re: 0, im: 1e-6 },
+        cavityOverlap: {},
       }),
     };
 

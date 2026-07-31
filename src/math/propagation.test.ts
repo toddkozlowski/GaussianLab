@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { ConcreteBeamPropagationEngine } from './propagation';
 import { freeSpaceABCD, thinLensABCD } from './abcd';
 import { rayleighRange } from './qParameter';
+import { calculateModeOverlapFromWaistParams } from './overlap';
 import type { PropagationEngineInput } from '../app/state/types/Layer0Interfaces';
 
 describe('Propagation Engine', () => {
@@ -315,6 +316,164 @@ describe('Propagation Engine', () => {
       const result = engine.propagateBeam(input);
       const lastZ = result.profile[result.profile.length - 1].z;
       expect(lastZ).toBeCloseTo(100, 6);
+    });
+  });
+
+  describe('cavity physical geometry (component position = input mirror)', () => {
+    it('does not terminate on a sub-millimeter waist-position mismatch that rigorous overlap still rates >99%', () => {
+      // Regression test: the old accept/reject check used an approximate,
+      // reference-plane-dependent overlap formula that could crash to ~0.23
+      // (below the 25% threshold) for a mismatch as small as 0.1 mm, even
+      // though the rigorous formula (what the UI reports as "mode matching")
+      // rates the same beams at >99.99%. The engine must use the rigorous
+      // formula so it never rejects a coupling the UI reports as matched.
+      const w0Mm = 1; // 1 mm waist, same size for beam and cavity eigenmode
+      const zRMm = rayleighRange(w0Mm / 1000, WAVELENGTH_M) * 1000;
+      const distanceToM1Mm = 100; // pure free space up to the cavity's input mirror
+      const waistPositionFromM1Mm = 50;
+      const mismatchMm = 0.1; // sub-mm position perturbation
+
+      // Incoming beam's own waist sits `mismatchMm` past the cavity's waist
+      // (both measured from the segment start, i.e. from M1's frame).
+      const beamWaistFromSegmentStartMm = distanceToM1Mm + waistPositionFromM1Mm + mismatchMm;
+      const q0 = { re: -beamWaistFromSegmentStartMm, im: zRMm };
+
+      const input: PropagationEngineInput = {
+        q0,
+        wavelengthMetres: WAVELENGTH_M,
+        segments: [
+          {
+            distance: distanceToM1Mm,
+            abcdMatrix: { A: 1, B: distanceToM1Mm, C: 0, D: 1 },
+            componentId: 'FP1',
+            componentKind: 'cavity_fp',
+            cavityEigenmode: {
+              waistRadius: w0Mm,
+              waistPositionFromM1: waistPositionFromM1Mm,
+              stabilityProduct: 0.5,
+              isStable: true,
+            },
+            cavityLengthMm: 100,
+          },
+          {
+            distance: 25,
+            abcdMatrix: { A: 1, B: 25, C: 0, D: 1 },
+            componentId: null,
+          },
+        ],
+        componentZMap: { FP1: distanceToM1Mm },
+      };
+
+      const result = engine.propagateBeam(input);
+      expect(result.profile[result.profile.length - 1].z).toBeCloseTo(distanceToM1Mm + 25, 6);
+      expect(result.cavityOverlap.FP1).toBeGreaterThan(0.99);
+    });
+
+    it('places the cavity eigenmode waist at its true physical position relative to the input mirror', () => {
+      // Regression test: component.position is now anchored at the cavity's
+      // input mirror (M1), so a segment ending at a cavity is pure free
+      // space up to M1, with no extra half-cavity-length offset involved.
+      const distanceToM1Mm = 100;
+      const waistPositionFromM1Mm = 20; // within the 25 mm segment that follows M1
+
+      const input: PropagationEngineInput = {
+        q0: { re: 0, im: 10 },
+        wavelengthMetres: WAVELENGTH_M,
+        segments: [
+          {
+            distance: distanceToM1Mm,
+            abcdMatrix: { A: 1, B: distanceToM1Mm, C: 0, D: 1 },
+            componentId: 'FP1',
+            componentKind: 'cavity_fp',
+            cavityEigenmode: {
+              waistRadius: 0.06,
+              waistPositionFromM1: waistPositionFromM1Mm,
+              stabilityProduct: 0.5,
+              isStable: true,
+            },
+            cavityLengthMm: 50,
+            cavityCouplingThreshold: 0,
+          },
+          {
+            distance: 25,
+            abcdMatrix: { A: 1, B: 25, C: 0, D: 1 },
+            componentId: null,
+          },
+        ],
+        componentZMap: { FP1: distanceToM1Mm },
+      };
+
+      const result = engine.propagateBeam(input);
+
+      // The waist is reported against whichever segment boundary it falls
+      // within (here, the segment following the cavity), not tagged by
+      // cavity ID - so match purely on position.
+      const expectedWaistZM = (distanceToM1Mm + waistPositionFromM1Mm) / 1000;
+      const cavityWaist = result.waists.find((w) => Math.abs(w.z - expectedWaistZM) < 1e-9);
+
+      expect(cavityWaist).toBeDefined();
+      expect(cavityWaist!.w).toBeCloseTo(0.06 / 1000, 9);
+    });
+
+    it('reports the true measured input-vs-eigenmode overlap per cavity, not clamped to 1 once matched', () => {
+      // Regression test: the accept/reject check used to only expose a
+      // pass/fail boolean; downstream code (modeMetrics.computeLiveModeOverlap)
+      // ended up comparing the forced eigenmode output against itself,
+      // always reading 100% once transmission was accepted. The engine must
+      // record the actual overlap it measured, whatever that value is.
+      const w0Mm = 0.04;
+      const zRMm = rayleighRange(w0Mm / 1000, WAVELENGTH_M) * 1000;
+      const waistPositionFromM1Mm = 20;
+      const mismatchMm = 2 * zRMm; // deliberately partial, not near-perfect, match
+      const distanceToM1Mm = 100;
+
+      const beamWaistFromSegmentStartMm = distanceToM1Mm + waistPositionFromM1Mm + mismatchMm;
+      const q0 = { re: -beamWaistFromSegmentStartMm, im: zRMm };
+
+      const expectedOverlap = calculateModeOverlapFromWaistParams(
+        w0Mm,
+        waistPositionFromM1Mm + mismatchMm,
+        w0Mm,
+        waistPositionFromM1Mm,
+        WAVELENGTH_NM,
+      );
+      // Sanity: this should be a genuinely partial match, not ~0 or ~1.
+      expect(expectedOverlap).toBeGreaterThan(0.3);
+      expect(expectedOverlap).toBeLessThan(0.9);
+
+      const input: PropagationEngineInput = {
+        q0,
+        wavelengthMetres: WAVELENGTH_M,
+        segments: [
+          {
+            distance: distanceToM1Mm,
+            abcdMatrix: { A: 1, B: distanceToM1Mm, C: 0, D: 1 },
+            componentId: 'FP1',
+            componentKind: 'cavity_fp',
+            cavityEigenmode: {
+              waistRadius: w0Mm,
+              waistPositionFromM1: waistPositionFromM1Mm,
+              stabilityProduct: 0.5,
+              isStable: true,
+            },
+            cavityLengthMm: 50,
+          },
+          {
+            distance: 25,
+            abcdMatrix: { A: 1, B: 25, C: 0, D: 1 },
+            componentId: null,
+          },
+        ],
+        componentZMap: { FP1: distanceToM1Mm },
+      };
+
+      const result = engine.propagateBeam(input);
+
+      // Coupling should still succeed (partial match clears the default 25% bar)...
+      expect(result.profile[result.profile.length - 1].z).toBeCloseTo(distanceToM1Mm + 25, 6);
+      // ...but the reported overlap must be the true measured value, not 1.
+      expect(result.cavityOverlap.FP1).toBeCloseTo(expectedOverlap, 6);
+      expect(result.cavityOverlap.FP1).toBeLessThan(0.999);
     });
   });
 
