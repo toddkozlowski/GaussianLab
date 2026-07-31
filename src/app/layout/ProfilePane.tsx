@@ -10,14 +10,13 @@ const BeamProfileChart = lazy(() => import('../../ui/profile/BeamProfileChart').
 interface ProfilePaneProps {
   hoveredZMm: number | null;
   onHoverZMm: (zMm: number | null) => void;
-  showTargetProfile: boolean;
 }
 
-export function ProfilePane({ hoveredZMm, onHoverZMm, showTargetProfile }: ProfilePaneProps) {
+export function ProfilePane({ hoveredZMm, onHoverZMm }: ProfilePaneProps) {
   const { state, dispatch } = useAppStore();
   const source = state.sourceId ? state.components[state.sourceId] : null;
   const sourceComponent = source && source.kind === 'source' ? source : null;
-  const liveOverlap = showTargetProfile ? computeLiveModeOverlap(state) : null;
+  const liveOverlap = computeLiveModeOverlap(state);
   const isJsdomTestEnv =
     typeof window !== 'undefined' &&
     typeof window.navigator !== 'undefined' &&
@@ -66,7 +65,6 @@ export function ProfilePane({ hoveredZMm, onHoverZMm, showTargetProfile }: Profi
               targetMode={state.targetMode}
               hoveredZMm={hoveredZMm}
               onHoverZMm={onHoverZMm}
-              showTargetProfile={showTargetProfile}
               liveOverlap={liveOverlap}
               onMoveLensAlongPath={handleLensPathMove}
             />

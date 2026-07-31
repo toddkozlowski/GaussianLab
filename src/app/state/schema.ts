@@ -59,6 +59,8 @@ export interface CavityFPComponent extends BaseComponent {
   r2: number;
   direction: CardinalDirection;
   eigenmode: CavityEigenmode | null;
+  /** Show the eigenmode's Gaussian projection across the whole beam profile. */
+  showProjection: boolean;
 }
 
 /**
@@ -69,6 +71,8 @@ export interface CavityFPComponent extends BaseComponent {
 export interface TargetComponent extends BaseComponent {
   kind: 'target';
   waistRadius: number;
+  /** Show this target's Gaussian mode projection across the whole beam profile. */
+  showProjection: boolean;
 }
 
 export type OpticalComponent =

@@ -147,6 +147,7 @@ describe('AppStore', () => {
       r2: 100,
       direction: 'right' as const,
       eigenmode: null,
+      showProjection: false,
     };
 
     store.dispatch({

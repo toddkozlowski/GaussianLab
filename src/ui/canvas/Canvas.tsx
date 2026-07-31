@@ -30,6 +30,8 @@ import { snapPointToGrid, gridSpacingMm } from '../../app/state/snapToGrid';
 import { handleCaretStepKeyDown } from '../shared/numericCaretStep';
 import lockIcon from '../../../icons/lock.svg';
 import lockOpenIcon from '../../../icons/lock-open.svg';
+import eyeIcon from '../../../icons/eye.svg';
+import eyeOffIcon from '../../../icons/eye-off.svg';
 import rotateCcwIcon from '../../../icons/rotate-ccw.svg';
 import rotateCwIcon from '../../../icons/rotate-cw.svg';
 import trashIcon from '../../../icons/trash-2.svg';
@@ -61,6 +63,8 @@ export const Canvas: React.FC<CanvasProps> = ({
   const source = sourceId ? components[sourceId] : null;
   const sourceComponent = source && source.kind === 'source' ? (source as SourceComponent) : null;
   const selected = state.selectedComponentId ? state.components[state.selectedComponentId] : null;
+  const isSelectedOnPath =
+    !!selected && (beamPath?.segments.some((segment) => segment.terminatedByComponentId === selected.id) ?? false);
   const hoveredProfilePoint = React.useMemo(
     () => (hoveredZMm === null ? null : nearestProfilePoint(propagationResult?.profile ?? [], hoveredZMm)),
     [hoveredZMm, propagationResult]
@@ -117,12 +121,13 @@ export const Canvas: React.FC<CanvasProps> = ({
   // from the beam to be considered part of the path, and must keep its own
   // dragged-to position rather than being forced back onto the beam.
   const nearestBeamAxisSnap = React.useCallback(
-    (point: Point2d, thresholdMm: number): Point2d | null => {
+    (point: Point2d, thresholdMm: number): { position: Point2d; direction: CardinalDirection } | null => {
       if (!beamPath || !beamPath.isValid || beamPath.segments.length === 0) {
         return null;
       }
 
       let best: Point2d | null = null;
+      let bestDirection: CardinalDirection | null = null;
       let bestTransverse = Number.POSITIVE_INFINITY;
       let bestScore = Number.POSITIVE_INFINITY;
 
@@ -144,29 +149,33 @@ export const Canvas: React.FC<CanvasProps> = ({
           bestScore = score;
           bestTransverse = transverse;
           best = snapped;
+          bestDirection = segment.direction;
         }
       }
 
-      if (best === null || bestTransverse > thresholdMm) {
+      if (best === null || bestDirection === null || bestTransverse > thresholdMm) {
         return null;
       }
 
-      return best;
+      return { position: best, direction: bestDirection };
     },
     [beamPath]
   );
 
   const normalizePosition = React.useCallback(
-    (component: OpticalComponent, rawPos: Point2d): Point2d => {
+    (component: OpticalComponent, rawPos: Point2d): { position: Point2d; direction: CardinalDirection | null } => {
       let next = clampToTableCenter(rawPos);
 
       if (!config.snapToGrid) {
-        return next;
+        return { position: next, direction: null };
       }
 
       if (component.kind === 'source' || component.kind === 'mirror_flat') {
         next = snapPointToGrid(next, config.gridStandard);
-      } else if (component.kind === 'lens_thin' || component.kind === 'cavity_fp' || component.kind === 'target') {
+        return { position: clampToTableCenter(next), direction: null };
+      }
+
+      if (component.kind === 'lens_thin' || component.kind === 'cavity_fp' || component.kind === 'target') {
         // Only snap onto the beam axis while the drag stays within the same
         // capture distance the physics engine uses to decide whether this
         // object is actually part of the beam path (beamPathResolver.ts).
@@ -176,11 +185,13 @@ export const Canvas: React.FC<CanvasProps> = ({
           component.kind === 'cavity_fp' ? gridSpacingMm(config.gridStandard) : config.axisCaptureThreshold;
         const snapped = nearestBeamAxisSnap(next, thresholdMm);
         if (snapped) {
-          next = snapped;
+          // A cavity's visual orientation should always match the beam it
+          // just snapped onto, rather than whatever it was rotated to before.
+          return { position: clampToTableCenter(snapped.position), direction: snapped.direction };
         }
       }
 
-      return clampToTableCenter(next);
+      return { position: clampToTableCenter(next), direction: null };
     },
     [clampToTableCenter, config.axisCaptureThreshold, config.gridStandard, config.snapToGrid, nearestBeamAxisSnap]
   );
@@ -192,11 +203,22 @@ export const Canvas: React.FC<CanvasProps> = ({
     }
 
     const normalized = normalizePosition(component, newPos);
+    if (component.kind === 'cavity_fp' && normalized.direction) {
+      dispatch({
+        type: 'UPDATE_COMPONENT',
+        payload: {
+          id: componentId,
+          updates: { position: normalized.position, direction: normalized.direction },
+        },
+      });
+      return;
+    }
+
     dispatch({
       type: 'UPDATE_COMPONENT',
       payload: {
         id: componentId,
-        updates: { position: normalized },
+        updates: { position: normalized.position },
       },
     });
   };
@@ -212,7 +234,7 @@ export const Canvas: React.FC<CanvasProps> = ({
       type: 'UPDATE_COMPONENT',
       payload: {
         id: componentId,
-        updates: { position: normalized },
+        updates: { position: normalized.position },
       },
     });
   };
@@ -225,7 +247,7 @@ export const Canvas: React.FC<CanvasProps> = ({
         x: (rawPx.x - tablePadding) / tableScale,
         y: (rawPx.y - tablePadding) / tableScale,
       };
-      const normalized = normalizePosition(component, pointMm);
+      const normalized = normalizePosition(component, pointMm).position;
       return {
         x: Math.max(tablePadding, Math.min(tablePadding + widthPx, tablePadding + mmToPx(normalized.x))),
         y: Math.max(tablePadding, Math.min(tablePadding + heightPx, tablePadding + mmToPx(normalized.y))),
@@ -458,6 +480,21 @@ export const Canvas: React.FC<CanvasProps> = ({
           <div className="canvas-selection-topbar">
             <div className="canvas-selection-header">{selected.label}</div>
             <div className="canvas-selection-topbar-actions">
+              {(selected.kind === 'cavity_fp' || selected.kind === 'target') && (
+                <button
+                  type="button"
+                  className="icon-button"
+                  aria-label={selected.showProjection ? 'Hide mode projection' : 'Show mode projection'}
+                  onClick={() =>
+                    dispatch({
+                      type: 'UPDATE_COMPONENT',
+                      payload: { id: selected.id, updates: { showProjection: !selected.showProjection } },
+                    })
+                  }
+                >
+                  <img className="icon-glyph" src={selected.showProjection ? eyeIcon : eyeOffIcon} alt="" />
+                </button>
+              )}
               <button
                 type="button"
                 className="icon-button"
@@ -514,7 +551,9 @@ export const Canvas: React.FC<CanvasProps> = ({
             </label>
           </div>
           <div className="canvas-selection-actions">
-            {(selected.kind === 'mirror_flat' || selected.kind === 'source' || selected.kind === 'cavity_fp') && (
+            {(selected.kind === 'mirror_flat' ||
+              selected.kind === 'source' ||
+              (selected.kind === 'cavity_fp' && !isSelectedOnPath)) && (
               <>
                 <button type="button" className="icon-button" aria-label="Rotate counterclockwise" onClick={() => rotateSelected(false)}>
                   <img className="icon-glyph" src={rotateCcwIcon} alt="" />
@@ -523,6 +562,9 @@ export const Canvas: React.FC<CanvasProps> = ({
                   <img className="icon-glyph" src={rotateCwIcon} alt="" />
                 </button>
               </>
+            )}
+            {selected.kind === 'cavity_fp' && isSelectedOnPath && (
+              <span className="canvas-rotation-locked-hint">Direction follows the beam</span>
             )}
           </div>
 
@@ -741,29 +783,55 @@ export const Canvas: React.FC<CanvasProps> = ({
               </label>
               <label>
                 R1 (mm)
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  value={Number.isFinite(selected.r1) ? formatFixed3(selected.r1) : ''}
-                  placeholder="Infinity"
-                  onChange={(event) => updateCavityRadius(dispatch, selected.id, 'r1', event.target.value)}
-                  onKeyDown={(event) =>
-                    handleCaretStepKeyDown(event, (value) => updateCavityRadius(dispatch, selected.id, 'r1', String(value)))
-                  }
-                />
+                <div className="canvas-radius-row">
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    className="canvas-radius-input"
+                    value={Number.isFinite(selected.r1) ? formatFixed3(selected.r1) : ''}
+                    placeholder="Infinity"
+                    onChange={(event) => updateCavityRadius(dispatch, selected.id, 'r1', event.target.value)}
+                    onKeyDown={(event) =>
+                      handleCaretStepKeyDown(event, (value) => updateCavityRadius(dispatch, selected.id, 'r1', String(value)))
+                    }
+                  />
+                  <label className="canvas-radius-flat-toggle">
+                    <input
+                      type="checkbox"
+                      checked={!Number.isFinite(selected.r1)}
+                      onChange={(event) =>
+                        updateCavityRadius(dispatch, selected.id, 'r1', event.target.checked ? '' : '100')
+                      }
+                    />
+                    flat
+                  </label>
+                </div>
               </label>
               <label>
                 R2 (mm)
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  value={Number.isFinite(selected.r2) ? formatFixed3(selected.r2) : ''}
-                  placeholder="Infinity"
-                  onChange={(event) => updateCavityRadius(dispatch, selected.id, 'r2', event.target.value)}
-                  onKeyDown={(event) =>
-                    handleCaretStepKeyDown(event, (value) => updateCavityRadius(dispatch, selected.id, 'r2', String(value)))
-                  }
-                />
+                <div className="canvas-radius-row">
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    className="canvas-radius-input"
+                    value={Number.isFinite(selected.r2) ? formatFixed3(selected.r2) : ''}
+                    placeholder="Infinity"
+                    onChange={(event) => updateCavityRadius(dispatch, selected.id, 'r2', event.target.value)}
+                    onKeyDown={(event) =>
+                      handleCaretStepKeyDown(event, (value) => updateCavityRadius(dispatch, selected.id, 'r2', String(value)))
+                    }
+                  />
+                  <label className="canvas-radius-flat-toggle">
+                    <input
+                      type="checkbox"
+                      checked={!Number.isFinite(selected.r2)}
+                      onChange={(event) =>
+                        updateCavityRadius(dispatch, selected.id, 'r2', event.target.checked ? '' : '100')
+                      }
+                    />
+                    flat
+                  </label>
+                </div>
               </label>
             </div>
           )}

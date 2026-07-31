@@ -1,5 +1,12 @@
 /**
- * CavityRenderer: Draws Fabry-Perot cavity as pair of mirrors with separation
+ * CavityRenderer: Draws Fabry-Perot cavity as pair of mirrors with separation.
+ *
+ * Each mirror is drawn as a reflective coating (a thin, possibly slightly
+ * curved band facing into the cavity) plus a substrate block extending
+ * outward, purely for visual depth. component.position anchors M1 and
+ * component.position + length anchors M2 exactly as before - only the
+ * *inner* face of each mirror sits at those positions, so nothing about the
+ * physics/snapping changes.
  */
 
 import React, { useRef } from 'react';
@@ -16,6 +23,64 @@ interface CavityRendererProps {
   isSelected: boolean;
 }
 
+const CONCAVE_BOW_PX = 4;
+
+function isConcave(radiusMm: number): boolean {
+  return Number.isFinite(radiusMm) && radiusMm > 0;
+}
+
+interface MirrorFaceProps {
+  /** Local coordinate along the cavity's propagation axis where the reflective surface sits. */
+  axisPos: number;
+  /** +1 or -1: which way along the axis the substrate extends (away from the cavity interior). */
+  outwardSign: 1 | -1;
+  span: number;
+  thickness: number;
+  radiusMm: number;
+  isHorizontal: boolean;
+  isSelected: boolean;
+  fillColor: string;
+}
+
+const MirrorFace: React.FC<MirrorFaceProps> = ({
+  axisPos,
+  outwardSign,
+  span,
+  thickness,
+  radiusMm,
+  isHorizontal,
+  isSelected,
+  fillColor,
+}) => {
+  const bow = isConcave(radiusMm) ? outwardSign * CONCAVE_BOW_PX : 0;
+  const substrateRectStart = outwardSign > 0 ? axisPos : axisPos - thickness;
+
+  const coatingPoints = isHorizontal
+    ? [axisPos, -span / 2, axisPos + bow, 0, axisPos, span / 2]
+    : [-span / 2, axisPos, 0, axisPos + bow, span / 2, axisPos];
+
+  return (
+    <>
+      <Rect
+        x={isHorizontal ? substrateRectStart : -span / 2}
+        y={isHorizontal ? -span / 2 : substrateRectStart}
+        width={isHorizontal ? thickness : span}
+        height={isHorizontal ? span : thickness}
+        fill="#c2c9d1"
+        stroke={isSelected ? '#1f6feb' : '#5b6b7a'}
+        strokeWidth={isSelected ? 2 : 1.5}
+      />
+      <Line
+        points={coatingPoints}
+        tension={bow !== 0 ? 0.5 : 0}
+        stroke={isSelected ? '#1f6feb' : fillColor}
+        strokeWidth={isSelected ? 3.5 : 2.5}
+        lineCap="round"
+      />
+    </>
+  );
+};
+
 export const CavityRenderer: React.FC<CavityRendererProps> = ({
   component,
   mmToPx,
@@ -31,16 +96,12 @@ export const CavityRenderer: React.FC<CavityRendererProps> = ({
   const x = mmToPx(component.position.x);
   const y = mmToPx(component.position.y);
   const cavityLengthPx = mmToPx(Math.max(1, Math.round(component.length)));
-  const mirrorThickness = Math.max(2, mmToPx(1));
   const mirrorSpan = Math.max(12, mmToPx(24));
+  const substrateThickness = Math.max(3, mirrorSpan / 4);
   const isHorizontal = component.direction === 'right' || component.direction === 'left';
   // Beam travels in +x/+y for 'right'/'down', -x/-y for 'left'/'up'.
   const dirSign = component.direction === 'right' || component.direction === 'down' ? 1 : -1;
   const m2OffsetPx = dirSign * cavityLengthPx;
-  const m1RectX = -mirrorThickness / 2;
-  const m2RectX = m2OffsetPx - mirrorThickness / 2;
-  const m1RectY = -mirrorThickness / 2;
-  const m2RectY = m2OffsetPx - mirrorThickness / 2;
 
   const handleDragEnd = (e: Konva.KonvaEventObject<DragEvent>) => {
     if (groupRef.current) {
@@ -69,68 +130,40 @@ export const CavityRenderer: React.FC<CavityRendererProps> = ({
         document.body.style.cursor = 'default';
       }}
     >
-      {isHorizontal ? (
-        <>
-          {/* M1 (input mirror), anchored at the component position */}
-          <Rect
-            x={m1RectX}
-            y={-mirrorSpan / 2}
-            width={mirrorThickness}
-            height={mirrorSpan}
-            fill={fillColor}
-            stroke={isSelected ? '#1f6feb' : '#333'}
-            strokeWidth={isSelected ? 3 : 2}
-          />
-          <Line
-            points={[0, 0, m2OffsetPx, 0]}
-            stroke="#999"
-            strokeWidth={1}
-          />
-          {/* M2 (output mirror), `length` downstream of M1 */}
-          <Rect
-            x={m2RectX}
-            y={-mirrorSpan / 2}
-            width={mirrorThickness}
-            height={mirrorSpan}
-            fill={fillColor}
-            stroke={isSelected ? '#1f6feb' : '#333'}
-            strokeWidth={isSelected ? 3 : 2}
-          />
-        </>
-      ) : (
-        <>
-          {/* M1 (input mirror), anchored at the component position */}
-          <Rect
-            x={-mirrorSpan / 2}
-            y={m1RectY}
-            width={mirrorSpan}
-            height={mirrorThickness}
-            fill={fillColor}
-            stroke={isSelected ? '#1f6feb' : '#333'}
-            strokeWidth={isSelected ? 3 : 2}
-          />
-          <Line
-            points={[0, 0, 0, m2OffsetPx]}
-            stroke="#999"
-            strokeWidth={1}
-          />
-          {/* M2 (output mirror), `length` downstream of M1 */}
-          <Rect
-            x={-mirrorSpan / 2}
-            y={m2RectY}
-            width={mirrorSpan}
-            height={mirrorThickness}
-            fill={fillColor}
-            stroke={isSelected ? '#1f6feb' : '#333'}
-            strokeWidth={isSelected ? 3 : 2}
-          />
-        </>
-      )}
+      {/* M1 (input mirror): reflective face at axis 0, substrate extends upstream (away from M2) */}
+      <MirrorFace
+        axisPos={0}
+        outwardSign={dirSign > 0 ? -1 : 1}
+        span={mirrorSpan}
+        thickness={substrateThickness}
+        radiusMm={component.r1}
+        isHorizontal={isHorizontal}
+        isSelected={isSelected}
+        fillColor={fillColor}
+      />
+
+      <Line
+        points={isHorizontal ? [0, 0, m2OffsetPx, 0] : [0, 0, 0, m2OffsetPx]}
+        stroke="#999"
+        strokeWidth={1}
+      />
+
+      {/* M2 (output mirror): reflective face `length` downstream of M1, substrate extends further downstream (away from M1) */}
+      <MirrorFace
+        axisPos={m2OffsetPx}
+        outwardSign={dirSign > 0 ? 1 : -1}
+        span={mirrorSpan}
+        thickness={substrateThickness}
+        radiusMm={component.r2}
+        isHorizontal={isHorizontal}
+        isSelected={isSelected}
+        fillColor={fillColor}
+      />
 
       {/* Label, anchored near M1 */}
       <Text
-        x={isHorizontal ? -mirrorThickness / 2 : mirrorSpan / 2 + 5}
-        y={isHorizontal ? -mirrorSpan / 2 - 16 : -mirrorThickness / 2 - 8}
+        x={isHorizontal ? -substrateThickness / 2 : mirrorSpan / 2 + 5}
+        y={isHorizontal ? -mirrorSpan / 2 - 16 : -substrateThickness / 2 - 8}
         text={component.label}
         fontSize={12}
         fill="#333"

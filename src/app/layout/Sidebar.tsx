@@ -15,15 +15,18 @@ import chevronUpIcon from '../../../icons/circle-chevron-up.svg';
 import helpIcon from '../../../icons/circle-question-mark.svg';
 import lockIcon from '../../../icons/lock.svg';
 import lockOpenIcon from '../../../icons/lock-open.svg';
+import eyeIcon from '../../../icons/eye.svg';
+import eyeOffIcon from '../../../icons/eye-off.svg';
 import trashIcon from '../../../icons/trash-2.svg';
 import warningIcon from '../../../icons/triangle-alert.svg';
 
-interface SidebarProps {
-  showTargetProfile: boolean;
-  onToggleTargetProfile: (value: boolean) => void;
+function hasProjectionToggle(
+  component: OpticalComponent
+): component is Extract<OpticalComponent, { kind: 'cavity_fp' | 'target' }> {
+  return component.kind === 'cavity_fp' || component.kind === 'target';
 }
 
-export function Sidebar({ showTargetProfile, onToggleTargetProfile }: SidebarProps) {
+export function Sidebar() {
   const { state, dispatch, runSolver, previewSolution, applySolution } = useAppStore();
   const [selectedTargetId, setSelectedTargetId] = useState<string>('');
   const [modeMatchingOpen, setModeMatchingOpen] = useState(false);
@@ -51,35 +54,39 @@ export function Sidebar({ showTargetProfile, onToggleTargetProfile }: SidebarPro
   }, [dangerousPairs]);
 
   const orderedComponents = useMemo(() => getOrderedComponents(state), [state]);
+  const hasSolvedSource = !!state.sourceId && state.components[state.sourceId]?.kind === 'source';
   const defaultPlacement = getDefaultPlacement(state);
 
   const addSource = () => {
-    const source = createSourceComponent(state.components, defaultPlacement);
+    const source = createSourceComponent(state.components, defaultPlacement.position);
     dispatch({ type: 'ADD_COMPONENT', payload: source });
     dispatch({ type: 'SET_SOURCE_ID', payload: { sourceId: source.id } });
     dispatch({ type: 'SET_SELECTED_COMPONENT', payload: { componentId: source.id } });
   };
 
   const addMirror = () => {
-    const mirror = createFlatMirrorComponent(state.components, defaultPlacement);
+    const mirror = createFlatMirrorComponent(state.components, defaultPlacement.position);
     dispatch({ type: 'ADD_COMPONENT', payload: mirror });
     dispatch({ type: 'SET_SELECTED_COMPONENT', payload: { componentId: mirror.id } });
   };
 
   const addLens = () => {
-    const lens = createLensThinComponent(state.components, defaultPlacement);
+    const lens = createLensThinComponent(state.components, defaultPlacement.position);
     dispatch({ type: 'ADD_COMPONENT', payload: lens });
     dispatch({ type: 'SET_SELECTED_COMPONENT', payload: { componentId: lens.id } });
   };
 
   const addCavity = () => {
-    const cavity = createCavityFPComponent(state.components, defaultPlacement);
+    const cavity = createCavityFPComponent(state.components, defaultPlacement.position);
+    // Orient the cavity to match the beam it's being dropped onto, rather
+    // than always defaulting to horizontal.
+    cavity.direction = defaultPlacement.direction;
     dispatch({ type: 'ADD_COMPONENT', payload: cavity });
     dispatch({ type: 'SET_SELECTED_COMPONENT', payload: { componentId: cavity.id } });
   };
 
   const addTarget = () => {
-    const target = createTargetComponent(state.components, defaultPlacement);
+    const target = createTargetComponent(state.components, defaultPlacement.position);
     dispatch({ type: 'ADD_COMPONENT', payload: target });
     dispatch({ type: 'SET_SELECTED_COMPONENT', payload: { componentId: target.id } });
   };
@@ -134,6 +141,7 @@ export function Sidebar({ showTargetProfile, onToggleTargetProfile }: SidebarPro
                   <th>Kind</th>
                   <th>Z</th>
                   <th>Prop</th>
+                  <th>Proj</th>
                   <th>Lock</th>
                   <th>Del</th>
                   <th>Warn</th>
@@ -144,6 +152,18 @@ export function Sidebar({ showTargetProfile, onToggleTargetProfile }: SidebarPro
                   const isSelected = state.selectedComponentId === component.id;
                   const pathPosition = getComponentPathPosition(state.sourceId, state.beamPath, component.id);
                   const warnings = proximityByComponent[component.id] ?? [];
+                  const isUnstableCavity =
+                    component.kind === 'cavity_fp' && hasSolvedSource && component.eigenmode === null;
+                  const warningMessages = [
+                    ...warnings.map(
+                      (entry) => `${component.label} is ${entry.distanceMm.toFixed(3)} mm from ${entry.otherLabel}`,
+                    ),
+                    ...(isUnstableCavity
+                      ? [
+                          `${component.label} is unstable: the cavity geometry (mirror curvatures and length) does not satisfy the resonator stability condition.`,
+                        ]
+                      : []),
+                  ];
                   return (
                     <tr
                       key={component.id}
@@ -167,6 +187,24 @@ export function Sidebar({ showTargetProfile, onToggleTargetProfile }: SidebarPro
                         <span className="path-position-cell">{formatPathPosition(pathPosition)}</span>
                       </td>
                       <td>{renderPropertyCell(component, dispatch)}</td>
+                      <td>
+                        {hasProjectionToggle(component) && (
+                          <button
+                            type="button"
+                            className="icon-button"
+                            aria-label={component.showProjection ? 'Hide mode projection' : 'Show mode projection'}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              dispatch({
+                                type: 'UPDATE_COMPONENT',
+                                payload: { id: component.id, updates: { showProjection: !component.showProjection } },
+                              });
+                            }}
+                          >
+                            <img className="icon-glyph" src={component.showProjection ? eyeIcon : eyeOffIcon} alt="" />
+                          </button>
+                        )}
+                      </td>
                       <td>
                         <button
                           type="button"
@@ -204,17 +242,14 @@ export function Sidebar({ showTargetProfile, onToggleTargetProfile }: SidebarPro
                         </button>
                       </td>
                       <td>
-                        {warnings.length > 0 && (
+                        {warningMessages.length > 0 && (
                           <button
                             type="button"
                             className="icon-button warning-button"
-                            aria-label="Show proximity warning"
+                            aria-label="Show warnings"
                             onClick={(event) => {
                               event.stopPropagation();
-                              const lines = warnings
-                                .map((entry) => `${component.label} is ${entry.distanceMm.toFixed(3)} mm from ${entry.otherLabel}`)
-                                .join('\n');
-                              window.alert(lines);
+                              window.alert(warningMessages.join('\n'));
                             }}
                           >
                             <img className="icon-glyph" src={warningIcon} alt="" />
@@ -264,15 +299,6 @@ export function Sidebar({ showTargetProfile, onToggleTargetProfile }: SidebarPro
               <button type="button" onClick={setSelectedAsTarget} disabled={!selectedTargetId}>
                 Use as mode-matching target
               </button>
-
-              <label className="mode-matching-inline-toggle">
-                <span>Show target mode</span>
-                <input
-                  type="checkbox"
-                  checked={showTargetProfile}
-                  onChange={(event) => onToggleTargetProfile(event.target.checked)}
-                />
-              </label>
 
               <button type="button" onClick={() => runSolver(5)}>Run optimizer</button>
 
@@ -508,10 +534,13 @@ function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
-function getDefaultPlacement(state: AppState): Point2d {
-  const fallback = {
-    x: state.table.width * 0.5,
-    y: state.table.height * 0.5,
+function getDefaultPlacement(state: AppState): { position: Point2d; direction: CardinalDirection } {
+  const fallback: { position: Point2d; direction: CardinalDirection } = {
+    position: {
+      x: state.table.width * 0.5,
+      y: state.table.height * 0.5,
+    },
+    direction: 'right',
   };
 
   const path = state.beamPath;
@@ -527,13 +556,19 @@ function getDefaultPlacement(state: AppState): Point2d {
   const offsetMm = 60;
   if (!lastHitIndex) {
     const segment = path.segments[0];
-    return clampToTable(moveAlong(segment.start, segment.direction, offsetMm), state);
+    return {
+      position: clampToTable(moveAlong(segment.start, segment.direction, offsetMm), state),
+      direction: segment.direction,
+    };
   }
 
   const currentSegment = path.segments[lastHitIndex.index];
   const downstreamSegment = path.segments[lastHitIndex.index + 1];
   const direction = downstreamSegment?.direction ?? currentSegment.direction;
-  return clampToTable(moveAlong(currentSegment.end, direction, offsetMm), state);
+  return {
+    position: clampToTable(moveAlong(currentSegment.end, direction, offsetMm), state),
+    direction,
+  };
 }
 
 function moveAlong(origin: Point2d, direction: CardinalDirection, distance: number): Point2d {

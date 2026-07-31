@@ -166,5 +166,43 @@ describe('Cavity eigenmode solver', () => {
       expect(eigenmode?.q.im).toBeCloseTo(0.05, 10);
       expect(eigenmode?.waistRadiusM).toBeGreaterThan(0);
     });
+
+    describe('flat mirrors (radius = Infinity)', () => {
+      // solveTwoMirrorEigenmode - the function actually wired into the app's
+      // cavity solver (see App.tsx) - has dedicated closed-form branches for
+      // infinite radii (see gParameter and the r1Finite/r2Finite branches in
+      // cavity.ts), not naive arithmetic on Infinity. These confirm that
+      // holds: no NaN, no Infinity leaking into the resulting waist/position,
+      // so a literal `Infinity` R value is mathematically safe to use as
+      // "flat" - no finite stand-in radius is needed.
+      it('solves a flat-concave (hemispherical) cavity with one infinite radius', () => {
+        // L=0.5, R2=1: zR^2 = L*(R2-L) = 0.5*0.5 = 0.25 > 0 -> valid
+        const eigenmode = solveTwoMirrorEigenmode(0.5, Infinity, 1, WAVELENGTH_M);
+        expect(eigenmode).not.toBeNull();
+        expect(eigenmode?.isStable).toBe(true);
+        expect(Number.isFinite(eigenmode!.waistRadiusM)).toBe(true);
+        expect(Number.isFinite(eigenmode!.waistPositionInCavityM)).toBe(true);
+        expect(Number.isFinite(eigenmode!.q.im)).toBe(true);
+        // Waist sits exactly at the flat mirror (M1).
+        expect(eigenmode?.waistPositionInCavityM).toBeCloseTo(0, 10);
+        expect(eigenmode?.g1).toBe(1);
+      });
+
+      it('solves a concave-flat cavity with the infinite radius on the second mirror', () => {
+        const eigenmode = solveTwoMirrorEigenmode(0.5, 1, Infinity, WAVELENGTH_M);
+        expect(eigenmode).not.toBeNull();
+        expect(eigenmode?.isStable).toBe(true);
+        expect(Number.isFinite(eigenmode!.waistRadiusM)).toBe(true);
+        expect(Number.isFinite(eigenmode!.waistPositionInCavityM)).toBe(true);
+        // Waist sits exactly at the flat mirror (M2), i.e. the full cavity length from M1.
+        expect(eigenmode?.waistPositionInCavityM).toBeCloseTo(0.5, 10);
+        expect(eigenmode?.g2).toBe(1);
+      });
+
+      it('treats a plane-parallel (flat-flat) cavity as degenerate, returning null rather than NaN', () => {
+        const eigenmode = solveTwoMirrorEigenmode(0.5, Infinity, Infinity, WAVELENGTH_M);
+        expect(eigenmode).toBeNull();
+      });
+    });
   });
 });

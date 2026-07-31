@@ -16,6 +16,9 @@ import type {
   SourceComponent,
   TargetMode,
 } from '../../app/state/schema';
+import { handleCaretStepKeyDown } from '../shared/numericCaretStep';
+import lockIcon from '../../../icons/lock.svg';
+import lockOpenIcon from '../../../icons/lock-open.svg';
 
 interface BeamProfileChartProps {
   source: SourceComponent | null;
@@ -25,7 +28,6 @@ interface BeamProfileChartProps {
   targetMode: TargetMode | null;
   hoveredZMm: number | null;
   onHoverZMm: (zMm: number | null) => void;
-  showTargetProfile: boolean;
   liveOverlap: number | null;
   onMoveLensAlongPath: (lensId: string, zMm: number) => void;
 }
@@ -33,7 +35,15 @@ interface BeamProfileChartProps {
 interface ProfilePoint {
   z: number;
   w: number;
-  targetW?: number;
+  [projectionKey: string]: number;
+}
+
+interface ModeProjection {
+  id: string;
+  label: string;
+  w0Mm: number;
+  z0Mm: number;
+  isSelected: boolean;
 }
 
 function buildFallbackProfile(source: SourceComponent | null, beamPath: BeamPath | null): ProfilePoint[] {
@@ -82,6 +92,19 @@ function formatBeamRadius(radiusMm: number) {
   return `${radiusMm.toFixed(4)} mm`;
 }
 
+function formatAxisMax(value: number): string {
+  if (!Number.isFinite(value)) {
+    return '';
+  }
+  if (value >= 100) {
+    return value.toFixed(0);
+  }
+  if (value >= 10) {
+    return value.toFixed(1);
+  }
+  return value.toFixed(2);
+}
+
 export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
   source,
   beamPath,
@@ -90,7 +113,6 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
   targetMode,
   hoveredZMm,
   onHoverZMm,
-  showTargetProfile,
   liveOverlap,
   onMoveLensAlongPath,
 }) => {
@@ -218,109 +240,230 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
       });
   }, [beamPath, components]);
 
-  const target = useMemo(() => {
-    if (!targetMode || !source || !beamPath) {
-      return null as null | { waistRadiusMm: number; waistZMm: number; label: string };
+  // Cavities and targets can each opt in to showing their Gaussian mode
+  // projected across the whole unfolded path (not just where the real beam
+  // actually follows it), via their own showProjection toggle.
+  const projections = useMemo(() => {
+    if (!beamPath) {
+      return [] as ModeProjection[];
     }
 
-    if (targetMode.kind === 'target') {
-      const targetComponent = components[targetMode.targetComponentId];
-      if (!targetComponent || targetComponent.kind !== 'target') {
-        return null;
+    const list: ModeProjection[] = [];
+
+    for (const segment of beamPath.segments) {
+      const id = segment.terminatedByComponentId;
+      if (!id) {
+        continue;
       }
 
-      const encounter = beamPath.segments.find((segment) => segment.terminatedByComponentId === targetComponent.id);
-      if (!encounter) {
-        return null;
+      const component = components[id];
+      if (!component) {
+        continue;
       }
 
-      return {
-        waistRadiusMm: targetComponent.waistRadius,
-        waistZMm: encounter.zEnd,
-        label: `${targetComponent.label} target`,
-      };
+      if (component.kind === 'cavity_fp') {
+        if (!component.showProjection || !component.eigenmode) {
+          continue;
+        }
+
+        // component.position anchors the input mirror (M1).
+        const m1ZMm = segment.zEnd;
+        list.push({
+          id,
+          label: `${component.label} eigenmode`,
+          w0Mm: component.eigenmode.waistRadius,
+          z0Mm: m1ZMm + component.eigenmode.waistPositionFromM1,
+          isSelected: targetMode?.kind === 'cavity' && targetMode.cavityComponentId === id,
+        });
+      } else if (component.kind === 'target') {
+        if (!component.showProjection) {
+          continue;
+        }
+
+        list.push({
+          id,
+          label: `${component.label} target`,
+          w0Mm: component.waistRadius,
+          z0Mm: segment.zEnd,
+          isSelected: targetMode?.kind === 'target' && targetMode.targetComponentId === id,
+        });
+      }
     }
 
-    const cavity = components[targetMode.cavityComponentId];
-    if (!cavity || cavity.kind !== 'cavity_fp' || !cavity.eigenmode) {
-      return null;
+    return list;
+  }, [beamPath, components, targetMode]);
+
+  // Target objects always show a marker at their own desired waist size,
+  // independent of whether their full mode projection is toggled on.
+  const targetWaistMarkers = useMemo(() => {
+    if (!beamPath) {
+      return [] as Array<{ z: number; w: number }>;
     }
 
-    const encounter = beamPath.segments.find((segment) => segment.terminatedByComponentId === cavity.id);
-    if (!encounter) {
-      return null;
+    const markers: Array<{ z: number; w: number }> = [];
+    for (const segment of beamPath.segments) {
+      const id = segment.terminatedByComponentId;
+      if (!id) {
+        continue;
+      }
+
+      const component = components[id];
+      if (!component || component.kind !== 'target') {
+        continue;
+      }
+
+      markers.push({ z: segment.zEnd, w: component.waistRadius });
     }
 
-    // The beam path treats the cavity's stored position as its input mirror
-    // (M1), so encounter.zEnd already is M1's z-position.
-    const m1ZMm = encounter.zEnd;
-
-    return {
-      waistRadiusMm: cavity.eigenmode.waistRadius,
-      waistZMm: m1ZMm + cavity.eigenmode.waistPositionFromM1,
-      label: `${cavity.label} target`,
-    };
-  }, [beamPath, components, source, targetMode]);
+    return markers;
+  }, [beamPath, components]);
 
   const profileData = useMemo<ProfilePoint[]>(() => {
-    if (!showTargetProfile || !target || !source) {
+    if (projections.length === 0 || !source) {
       return baseProfile;
     }
 
-    return baseProfile.map((point) => ({
-      ...point,
-      targetW: beamRadiusFromWaist(target.waistRadiusMm, target.waistZMm, point.z, source.wavelength),
-    }));
-  }, [baseProfile, showTargetProfile, source, target]);
+    return baseProfile.map((point) => {
+      const extended: ProfilePoint = { ...point };
+      for (const projection of projections) {
+        extended[`proj_${projection.id}`] = beamRadiusFromWaist(
+          projection.w0Mm,
+          projection.z0Mm,
+          point.z,
+          source.wavelength,
+        );
+      }
+      return extended;
+    });
+  }, [baseProfile, projections, source]);
 
-  const [autoScaleY, setAutoScaleY] = useState(true);
+  const [lockYAxis, setLockYAxis] = useState(false);
   const [lockedYMaxMm, setLockedYMaxMm] = useState(1);
+  const [lockXAxis, setLockXAxis] = useState(false);
+  const [lockedXMaxMm, setLockedXMaxMm] = useState(1);
+
+  const profileMaxMm = profileData.reduce((maxValue, point) => {
+    let pointMax = point.w;
+    for (const projection of projections) {
+      const value = point[`proj_${projection.id}`];
+      if (typeof value === 'number') {
+        pointMax = Math.max(pointMax, value);
+      }
+    }
+    return Math.max(maxValue, pointMax);
+  }, targetWaistMarkers.reduce((max, marker) => Math.max(max, marker.w), 0));
+  const dataXMaxMm = profileData[profileData.length - 1]?.z ?? 0;
+  const effectiveYMaxMm = Math.max(lockYAxis ? lockedYMaxMm : profileMaxMm, 0.001);
+  const effectiveXMaxMm = Math.max(lockXAxis ? lockedXMaxMm : dataXMaxMm, 0.001);
+  const useMicronAxis = effectiveYMaxMm * 1000 <= 3000;
+  const axisScale = useMicronAxis ? 1000 : 1;
+  const axisUnitLabel = useMicronAxis ? 'um' : 'mm';
+  const roundedYAxisMax = Math.max(1, Math.ceil(effectiveYMaxMm * axisScale));
+  const roundedXAxisMax = Math.max(1, Math.ceil(effectiveXMaxMm));
+  const chartData = profileData.map((point) => {
+    const scaled: Record<string, number> = { z: point.z, wAxis: point.w * axisScale };
+    for (const projection of projections) {
+      const value = point[`proj_${projection.id}`];
+      if (typeof value === 'number') {
+        scaled[`proj_${projection.id}Axis`] = value * axisScale;
+      }
+    }
+    return scaled;
+  });
+
+  // Nothing affects the displayed range while an axis is locked - the
+  // locked value only tracks the live auto-computed max while unlocked, so
+  // unlocking always resumes from the current data instead of a stale one.
+  useEffect(() => {
+    if (!lockYAxis) {
+      setLockedYMaxMm(profileMaxMm);
+    }
+  }, [lockYAxis, profileMaxMm]);
+
+  useEffect(() => {
+    if (!lockXAxis) {
+      setLockedXMaxMm(dataXMaxMm);
+    }
+  }, [lockXAxis, dataXMaxMm]);
+
+  const hoveredPoint = hoveredZMm !== null ? nearestProfilePoint(profileData, hoveredZMm) : null;
+  const hoveredPointAxisY = hoveredPoint ? hoveredPoint.w * axisScale : null;
 
   if (profileData.length === 0) {
     return <div className="profile-placeholder">No beam profile data available.</div>;
   }
 
-  const profileMaxMm = profileData.reduce((maxValue, point) => {
-    const pointMax = Math.max(point.w, point.targetW ?? 0);
-    return Math.max(maxValue, pointMax);
-  }, 0);
-  const effectiveYMaxMm = Math.max(autoScaleY ? profileMaxMm : lockedYMaxMm, 0.001);
-  const useMicronAxis = effectiveYMaxMm * 1000 <= 3000;
-  const axisScale = useMicronAxis ? 1000 : 1;
-  const axisUnitLabel = useMicronAxis ? 'um' : 'mm';
-  const roundedYAxisMax = Math.max(1, Math.ceil(effectiveYMaxMm * axisScale));
-  const chartData = profileData.map((point) => ({
-    ...point,
-    wAxis: point.w * axisScale,
-    targetWAxis: point.targetW === undefined ? undefined : point.targetW * axisScale,
-  }));
-
-  useEffect(() => {
-    if (autoScaleY) {
-      setLockedYMaxMm(profileMaxMm);
-    }
-  }, [autoScaleY, profileMaxMm]);
-
-  const hoveredPoint = hoveredZMm !== null ? nearestProfilePoint(profileData, hoveredZMm) : null;
-  const hoveredPointAxisY = hoveredPoint ? hoveredPoint.w * axisScale : null;
-
   return (
     <div className="profile-chart-shell">
       <div className="profile-chart-toolbar">
-        <label className="profile-toggle">
-          <span>Auto-scale Y</span>
-          <input
-            type="checkbox"
-            checked={autoScaleY}
-            onChange={(event) => {
-              const checked = event.target.checked;
-              if (!checked) {
-                setLockedYMaxMm(profileMaxMm);
+        <div className="profile-axis-control">
+          <button
+            type="button"
+            className="icon-button"
+            aria-label={lockXAxis ? 'Unlock X axis range' : 'Lock X axis range'}
+            onClick={() => setLockXAxis((locked) => !locked)}
+          >
+            <img className="icon-glyph" src={lockXAxis ? lockIcon : lockOpenIcon} alt="" />
+          </button>
+          <label className="profile-axis-max-field">
+            <span>X max (mm)</span>
+            <input
+              type="text"
+              inputMode="decimal"
+              className="profile-axis-max-input"
+              value={formatAxisMax(effectiveXMaxMm)}
+              onChange={(event) => {
+                const value = Number(event.target.value);
+                if (Number.isFinite(value) && value > 0) {
+                  setLockedXMaxMm(value);
+                  setLockXAxis(true);
+                }
+              }}
+              onKeyDown={(event) =>
+                handleCaretStepKeyDown(event, (value) => {
+                  if (value > 0) {
+                    setLockedXMaxMm(value);
+                    setLockXAxis(true);
+                  }
+                })
               }
-              setAutoScaleY(checked);
-            }}
-          />
-        </label>
+            />
+          </label>
+        </div>
+        <div className="profile-axis-control">
+          <button
+            type="button"
+            className="icon-button"
+            aria-label={lockYAxis ? 'Unlock Y axis range' : 'Lock Y axis range'}
+            onClick={() => setLockYAxis((locked) => !locked)}
+          >
+            <img className="icon-glyph" src={lockYAxis ? lockIcon : lockOpenIcon} alt="" />
+          </button>
+          <label className="profile-axis-max-field">
+            <span>Y max ({axisUnitLabel})</span>
+            <input
+              type="text"
+              inputMode="decimal"
+              className="profile-axis-max-input"
+              value={formatAxisMax(effectiveYMaxMm * axisScale)}
+              onChange={(event) => {
+                const value = Number(event.target.value);
+                if (Number.isFinite(value) && value > 0) {
+                  setLockedYMaxMm(value / axisScale);
+                  setLockYAxis(true);
+                }
+              }}
+              onKeyDown={(event) =>
+                handleCaretStepKeyDown(event, (value) => {
+                  if (value > 0) {
+                    setLockedYMaxMm(value / axisScale);
+                    setLockYAxis(true);
+                  }
+                })
+              }
+            />
+          </label>
+        </div>
       </div>
       <div className="profile-chart-frame" ref={frameRef}>
         <div style={{ width: '100%', height: 240 }}>
@@ -338,7 +481,8 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
               <XAxis
                 dataKey="z"
                 type="number"
-                domain={[0, 'dataMax']}
+                domain={[0, roundedXAxisMax]}
+                allowDataOverflow
                 tick={{ fontSize: 11, fill: '#55677a' }}
                 label={{ value: 'z (mm)', position: 'insideBottomRight', offset: -5, fill: '#55677a' }}
               />
@@ -346,6 +490,7 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
                 dataKey="wAxis"
                 type="number"
                 domain={[0, roundedYAxisMax]}
+                allowDataOverflow
                 tick={{ fontSize: 11, fill: '#55677a' }}
                 label={{ value: `w (${axisUnitLabel})`, angle: -90, position: 'insideLeft', fill: '#55677a' }}
               />
@@ -358,17 +503,18 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
                 isAnimationActive={false}
               />
 
-              {showTargetProfile && target && (
+              {projections.map((projection) => (
                 <Line
-                  dataKey="targetWAxis"
+                  key={`proj-line-${projection.id}`}
+                  dataKey={`proj_${projection.id}Axis`}
                   type="monotone"
-                  stroke="#6f52d9"
-                  strokeWidth={1.8}
+                  stroke={projection.isSelected ? '#6f52d9' : '#8ca0b5'}
+                  strokeWidth={projection.isSelected ? 1.8 : 1.3}
                   dot={false}
-                  strokeDasharray="7 5"
+                  strokeDasharray={projection.isSelected ? '7 5' : '4 4'}
                   isAnimationActive={false}
                 />
-              )}
+              ))}
 
               {componentMarkers.map((marker, index) => (
                 <ReferenceLine
@@ -427,12 +573,27 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
                   stroke="#ffffff"
                 />
               ))}
+
+              {targetWaistMarkers.map((marker, index) => (
+                <ReferenceDot
+                  key={`target-waist-${index}`}
+                  x={marker.z}
+                  y={marker.w * axisScale}
+                  r={5}
+                  fill="#17A2B8"
+                  stroke="#ffffff"
+                  strokeWidth={2}
+                />
+              ))}
             </LineChart>
           </ResponsiveContainer>
         </div>
 
         {lensMarkers.map((marker) => {
-          const zMax = profileData[profileData.length - 1]?.z ?? 1;
+          // Position against the axis's actual rendered domain, not the raw
+          // data max, so markers stay aligned with the curve when the X
+          // axis is locked to a different range.
+          const zMax = roundedXAxisMax;
           const leftPercent = zMax > 0 ? (marker.z / zMax) * 100 : 0;
           return (
             <button
@@ -457,8 +618,7 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
                     return;
                   }
                   const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-                  const maxZ = profileData[profileData.length - 1]?.z ?? 0;
-                  onMoveLensAlongPath(marker.id, ratio * maxZ);
+                  onMoveLensAlongPath(marker.id, ratio * roundedXAxisMax);
                 };
 
                 updateFromClientX(event.clientX);
@@ -486,7 +646,7 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
           </div>
         )}
 
-        {showTargetProfile && liveOverlap !== null && (
+        {liveOverlap !== null && (
           <div className="profile-overlap-chip">
             <strong>Overlap</strong>
             <span>{(liveOverlap * 100).toFixed(1)}%</span>

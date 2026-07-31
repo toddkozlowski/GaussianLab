@@ -85,6 +85,7 @@ export function createCavityFPComponent(
     r2: 100,
     direction: 'right',
     eigenmode: null,
+    showProjection: false,
   };
 }
 
@@ -99,6 +100,7 @@ export function createTargetComponent(
     locked: false,
     label: nextLabel('T', countComponentsByKind(components, 'target')),
     waistRadius: 0.4,
+    showProjection: false,
   };
 }
 

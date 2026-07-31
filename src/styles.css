@@ -401,6 +401,12 @@ button:disabled {
   gap: 6px;
 }
 
+.canvas-rotation-locked-hint {
+  font-size: 0.72rem;
+  color: #7a8898;
+  font-style: italic;
+}
+
 .canvas-source-editor {
   display: grid;
   gap: 6px;
@@ -414,6 +420,32 @@ button:disabled {
 .canvas-source-editor input {
   padding: 4px 6px;
   border-radius: 8px;
+}
+
+.canvas-radius-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.canvas-radius-row .canvas-radius-input {
+  width: 62px;
+  flex: 0 0 auto;
+}
+
+.canvas-radius-flat-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 0.72rem;
+  color: #425264;
+  white-space: nowrap;
+  flex: 1 1 auto;
+}
+
+.canvas-radius-flat-toggle input {
+  width: auto;
+  flex: 0 0 auto;
 }
 
 .icon-button {
@@ -480,18 +512,44 @@ button:disabled {
 .profile-chart-toolbar {
   display: flex;
   justify-content: flex-end;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 14px;
 }
 
-.profile-toggle {
+.profile-axis-control {
   display: inline-flex;
   align-items: center;
-  gap: 8px;
-  font-size: 0.78rem;
-  color: #425264;
+  gap: 6px;
 }
 
-.profile-toggle input {
-  width: auto;
+.profile-axis-max-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 0.78rem;
+  color: #425264;
+  white-space: nowrap;
+}
+
+.profile-axis-max-input {
+  width: 60px;
+  padding: 3px 6px;
+  border-radius: 6px;
+  border: 1px solid rgba(24, 33, 48, 0.24);
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  cursor: text;
+}
+
+.profile-axis-max-input:hover {
+  border-color: rgba(45, 155, 240, 0.55);
+}
+
+.profile-axis-max-input:focus {
+  border-color: rgba(45, 155, 240, 0.75);
+  outline: none;
+  box-shadow: 0 0 0 2px rgba(45, 155, 240, 0.2);
 }
 
 .profile-chart-frame {

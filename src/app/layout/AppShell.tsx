@@ -6,22 +6,14 @@ import { StatusBar } from './StatusBar';
 
 export function AppShell() {
   const [hoveredZMm, setHoveredZMm] = useState<number | null>(null);
-  const [showTargetProfile, setShowTargetProfile] = useState(true);
 
   return (
     <main className="app-shell">
       <section className="workspace" aria-label="GaussianLab workspace">
-        <Sidebar
-          showTargetProfile={showTargetProfile}
-          onToggleTargetProfile={setShowTargetProfile}
-        />
+        <Sidebar />
         <div className="primary-pane">
           <CanvasPane hoveredZMm={hoveredZMm} onHoverZMm={setHoveredZMm} />
-          <ProfilePane
-            hoveredZMm={hoveredZMm}
-            onHoverZMm={setHoveredZMm}
-            showTargetProfile={showTargetProfile}
-          />
+          <ProfilePane hoveredZMm={hoveredZMm} onHoverZMm={setHoveredZMm} />
         </div>
       </section>
       <StatusBar />
