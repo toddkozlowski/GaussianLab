@@ -2,7 +2,7 @@ export type CardinalDirection = 'right' | 'left' | 'up' | 'down';
 
 export type MirrorOrientation = 45 | 135 | 225 | 315;
 
-export type ComponentKind = 'source' | 'mirror_flat' | 'lens_thin' | 'cavity_fp' | 'target';
+export type ComponentKind = 'source' | 'mirror_flat' | 'lens_thin' | 'cavity_fp' | 'target' | 'beam_stop';
 
 export type GridStandard = 'metric' | 'imperial';
 
@@ -75,12 +75,22 @@ export interface TargetComponent extends BaseComponent {
   showProjection: boolean;
 }
 
+/**
+ * An opaque beam block: fully absorbs the beam wherever it's placed on the
+ * path, terminating propagation right there. It has no optical parameters -
+ * it just stops the beam.
+ */
+export interface BeamStopComponent extends BaseComponent {
+  kind: 'beam_stop';
+}
+
 export type OpticalComponent =
   | SourceComponent
   | FlatMirrorComponent
   | LensThinComponent
   | CavityFPComponent
-  | TargetComponent;
+  | TargetComponent
+  | BeamStopComponent;
 
 export interface TableConfig {
   width: number;

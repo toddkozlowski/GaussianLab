@@ -24,6 +24,7 @@ import { MirrorRenderer } from './components/MirrorRenderer';
 import { LensRenderer } from './components/LensRenderer';
 import { CavityRenderer } from './components/CavityRenderer';
 import { TargetRenderer } from './components/TargetRenderer';
+import { BeamStopRenderer } from './components/BeamStopRenderer';
 import { GridOverlay } from './GridOverlay';
 import { BeamCorridorOverlay } from './BeamCorridorOverlay';
 import { snapPointToGrid, gridSpacingMm } from '../../app/state/snapToGrid';
@@ -175,7 +176,12 @@ export const Canvas: React.FC<CanvasProps> = ({
         return { position: clampToTableCenter(next), direction: null };
       }
 
-      if (component.kind === 'lens_thin' || component.kind === 'cavity_fp' || component.kind === 'target') {
+      if (
+        component.kind === 'lens_thin' ||
+        component.kind === 'cavity_fp' ||
+        component.kind === 'target' ||
+        component.kind === 'beam_stop'
+      ) {
         // Only snap onto the beam axis while the drag stays within the same
         // capture distance the physics engine uses to decide whether this
         // object is actually part of the beam path (beamPathResolver.ts).
@@ -461,6 +467,16 @@ export const Canvas: React.FC<CanvasProps> = ({
                 )}
                 {component.kind === 'target' && (
                   <TargetRenderer
+                    component={component}
+                    mmToPx={mmToPx}
+                    onDragEnd={handleComponentDragEnd}
+                    onSelect={selectComponent}
+                    isDraggable={!component.locked}
+                    isSelected={state.selectedComponentId === component.id}
+                  />
+                )}
+                {component.kind === 'beam_stop' && (
+                  <BeamStopRenderer
                     component={component}
                     mmToPx={mmToPx}
                     onDragEnd={handleComponentDragEnd}

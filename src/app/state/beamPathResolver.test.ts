@@ -6,6 +6,7 @@ import {
   createLensThinComponent,
   createCavityFPComponent,
   createTargetComponent,
+  createBeamStopComponent,
 } from './componentFactories';
 import { DEFAULT_APP_STATE } from './defaultState';
 import type { AppState } from './schema';
@@ -358,5 +359,32 @@ describe('beamPathResolver', () => {
     const path = resolveBeamPath(state);
     expect(path).not.toBeNull();
     expect(path!.orderedComponentIds).not.toContain(cavity.id);
+  });
+
+  it('terminates the beam at a beam stop', () => {
+    const source = createSourceComponent();
+    source.position = { x: 100, y: 300 };
+    source.direction = 'right';
+
+    const beamStop = createBeamStopComponent({}, { x: 300, y: 300 }); // on-axis
+
+    // A lens placed beyond the beam stop should never be reached.
+    const lens = createLensThinComponent();
+    lens.position = { x: 500, y: 300 };
+
+    const state: AppState = {
+      ...DEFAULT_APP_STATE,
+      sourceId: source.id,
+      components: { [source.id]: source, [beamStop.id]: beamStop, [lens.id]: lens },
+    };
+
+    const path = resolveBeamPath(state);
+    expect(path).not.toBeNull();
+    expect(path!.isValid).toBe(true);
+    expect(path!.invalidReason).toBeNull();
+    expect(path!.orderedComponentIds).toEqual([beamStop.id]);
+    expect(path!.segments).toHaveLength(1); // source -> beam stop, nothing beyond
+    expect(path!.segments[0].terminatedByComponentId).toBe(beamStop.id);
+    expect(path!.segments[0].termination).toBe('component');
   });
 });

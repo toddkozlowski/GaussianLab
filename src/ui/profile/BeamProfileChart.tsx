@@ -129,14 +129,36 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
       return [] as Array<{ z: number; label: string }>;
     }
 
-    // Cavities get their own dedicated in/out/waist markers (see
-    // cavityMarkers below) instead of a single generic label.
+    // Cavities and beam stops get their own dedicated markers (see
+    // cavityMarkers/beamStopMarkers below) instead of a single generic label.
     return beamPath.segments
       .filter((segment) => {
         if (!segment.terminatedByComponentId) {
           return false;
         }
-        return components[segment.terminatedByComponentId]?.kind !== 'cavity_fp';
+        const kind = components[segment.terminatedByComponentId]?.kind;
+        return kind !== 'cavity_fp' && kind !== 'beam_stop';
+      })
+      .map((segment) => {
+        const id = segment.terminatedByComponentId as string;
+        return {
+          z: segment.zEnd,
+          label: components[id]?.label ?? id,
+        };
+      });
+  }, [beamPath, components]);
+
+  const beamStopMarkers = useMemo(() => {
+    if (!beamPath) {
+      return [] as Array<{ z: number; label: string }>;
+    }
+
+    return beamPath.segments
+      .filter((segment) => {
+        if (!segment.terminatedByComponentId) {
+          return false;
+        }
+        return components[segment.terminatedByComponentId]?.kind === 'beam_stop';
       })
       .map((segment) => {
         const id = segment.terminatedByComponentId as string;
@@ -523,6 +545,16 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
                   stroke="#8ca0b5"
                   strokeDasharray="4 4"
                   label={{ value: marker.label, position: 'insideTop', fill: '#4f6174', fontSize: 11 }}
+                />
+              ))}
+
+              {beamStopMarkers.map((marker, index) => (
+                <ReferenceLine
+                  key={`beam-stop-${index}`}
+                  x={marker.z}
+                  stroke="#c0392b"
+                  strokeWidth={2}
+                  label={{ value: `${marker.label} (beam stop)`, position: 'insideTop', fill: '#c0392b', fontSize: 11, fontWeight: 700 }}
                 />
               ))}
 

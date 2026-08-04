@@ -151,7 +151,7 @@ button:disabled {
 
 .sidebar {
   display: grid;
-  grid-template-rows: minmax(360px, 1.35fr) auto;
+  grid-template-rows: auto minmax(280px, 1.35fr) auto;
   gap: 16px;
   min-height: 0;
   overflow: hidden;
@@ -172,6 +172,32 @@ button:disabled {
 .component-toolbar {
   display: flex;
   flex-wrap: wrap;
+  gap: 6px;
+}
+
+.file-toolbar-panel {
+  padding: 10px 14px;
+}
+
+.file-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.file-toolbar-label {
+  font-size: 0.72rem;
+  font-weight: 650;
+  color: #6f7f91;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.file-toolbar-actions {
+  display: flex;
+  align-items: center;
   gap: 6px;
 }
 

@@ -285,6 +285,29 @@ describe('appStateReducer', () => {
     expect(newState.optimiser.solutions).toEqual([]);
   });
 
+  it('replaces the whole state wholesale on LOAD_STATE (e.g. loading a .gaussian file)', () => {
+    const existingLens = createLensThinComponent();
+    const currentState = {
+      ...DEFAULT_APP_STATE,
+      components: { [existingLens.id]: existingLens },
+      selectedComponentId: existingLens.id,
+    };
+
+    const loadedSource = createSourceComponent();
+    const loadedState = {
+      ...DEFAULT_APP_STATE,
+      sourceId: loadedSource.id,
+      components: { [loadedSource.id]: loadedSource },
+    };
+
+    const action: AppAction = { type: 'LOAD_STATE', payload: loadedState };
+    const newState = appStateReducer(currentState, action);
+
+    expect(newState).toBe(loadedState);
+    expect(newState.components).toEqual({ [loadedSource.id]: loadedSource });
+    expect(newState.components[existingLens.id]).toBeUndefined();
+  });
+
   it('maintains immutability when updating', () => {
     const source = createSourceComponent();
     const state = {

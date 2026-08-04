@@ -33,7 +33,8 @@ export type AppAction =
   | { type: 'SET_SOLVER_STATUS'; payload: 'idle' | 'running' | 'solved' | 'failed' }
   | { type: 'SET_SOLVER_PREVIEW_INDEX'; payload: { index: number | null } }
   | { type: 'CLEAR_SOLVER_SNAPSHOT'; payload: {} }
-  | { type: 'RESET_STATE' };
+  | { type: 'RESET_STATE' }
+  | { type: 'LOAD_STATE'; payload: AppState };
 
 /**
  * Reduce an action into a new AppState.
@@ -211,6 +212,13 @@ export function appStateReducer(state: AppState, action: AppAction): AppState {
           snapshotValid: false,
         },
       };
+    }
+
+    case 'LOAD_STATE': {
+      // Wholesale replace state with a loaded table (e.g. from a .gaussian
+      // file). Derived fields (beamPath, propagationResult, eigenmodes) get
+      // recomputed by stateResolver right after this, same as any dispatch.
+      return action.payload;
     }
 
     default:

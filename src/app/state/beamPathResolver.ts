@@ -172,6 +172,14 @@ function traceBeamPath(
       // Pass through: direction unchanged
       currentPos = hitPoint;
       // direction stays the same
+    } else if (component.kind === 'beam_stop') {
+      // Beam is fully absorbed here; the path is valid, it just ends.
+      return {
+        segments,
+        orderedComponentIds,
+        totalLength: totalZ,
+        invalidReason: null,
+      };
     } else {
       // Source (shouldn't hit source again)
       return {

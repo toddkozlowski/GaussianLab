@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  createBeamStopComponent,
   createCavityFPComponent,
   createFlatMirrorComponent,
   createLensThinComponent,
@@ -51,5 +52,17 @@ describe('componentFactories', () => {
     expect(firstTarget.label).toBe('T1');
     expect(firstTarget.waistRadius).toBeGreaterThan(0);
     expect(secondTarget.label).toBe('T2');
+  });
+
+  it('creates beam stop with expected defaults and incremental label', () => {
+    const components: Record<string, OpticalComponent> = {};
+    const firstStop = createBeamStopComponent(components, { x: 700, y: 300 });
+    components[firstStop.id] = firstStop;
+    const secondStop = createBeamStopComponent(components, { x: 800, y: 300 });
+
+    expect(firstStop.kind).toBe('beam_stop');
+    expect(firstStop.label).toBe('BS1');
+    expect(firstStop.locked).toBe(false);
+    expect(secondStop.label).toBe('BS2');
   });
 });

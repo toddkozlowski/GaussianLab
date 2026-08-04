@@ -1,6 +1,8 @@
-import { useMemo, useState } from 'react';
+import { useMemo, useRef, useState } from 'react';
+import type { ChangeEvent } from 'react';
 import { useAppStore } from '../adapters/useAppStore';
 import {
+  createBeamStopComponent,
   createCavityFPComponent,
   createFlatMirrorComponent,
   createLensThinComponent,
@@ -9,6 +11,7 @@ import {
 } from '../state/componentFactories';
 import type { AppState, CardinalDirection, OpticalComponent, Point2d, TargetMode } from '../state/schema';
 import { computeDangerousPairs, getComponentPathPosition } from '../state';
+import { GAUSSIAN_FILE_EXTENSION, parseAppState, serializeAppState } from '../state/fileFormat';
 import { handleCaretStepKeyDown } from '../../ui/shared/numericCaretStep';
 import chevronDownIcon from '../../../icons/circle-chevron-down.svg';
 import chevronUpIcon from '../../../icons/circle-chevron-up.svg';
@@ -20,6 +23,27 @@ import eyeOffIcon from '../../../icons/eye-off.svg';
 import trashIcon from '../../../icons/trash-2.svg';
 import warningIcon from '../../../icons/triangle-alert.svg';
 
+function defaultSaveFileName(): string {
+  const now = new Date();
+  const pad = (n: number) => String(n).padStart(2, '0');
+  const stamp = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  return `gaussianlab-table-${stamp}${GAUSSIAN_FILE_EXTENSION}`;
+}
+
+/** Trigger a browser download - used when the File System Access API (which
+ * lets the user pick a real directory) isn't available in this browser. */
+function downloadTextFile(filename: string, content: string) {
+  const blob = new Blob([content], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
 function hasProjectionToggle(
   component: OpticalComponent
 ): component is Extract<OpticalComponent, { kind: 'cavity_fp' | 'target' }> {
@@ -30,6 +54,84 @@ export function Sidebar() {
   const { state, dispatch, runSolver, previewSolution, applySolution } = useAppStore();
   const [selectedTargetId, setSelectedTargetId] = useState<string>('');
   const [modeMatchingOpen, setModeMatchingOpen] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const applyLoadedFile = (text: string) => {
+    let loaded: AppState;
+    try {
+      loaded = parseAppState(text);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Could not read that .gaussian file.');
+      return;
+    }
+    dispatch({ type: 'LOAD_STATE', payload: loaded });
+  };
+
+  const handleSave = async () => {
+    const content = serializeAppState(state);
+    const suggestedName = defaultSaveFileName();
+
+    if (window.showSaveFilePicker) {
+      try {
+        const handle = await window.showSaveFilePicker({
+          suggestedName,
+          types: [
+            {
+              description: 'GaussianLab table',
+              accept: { 'text/plain': [GAUSSIAN_FILE_EXTENSION] },
+            },
+          ],
+        });
+        const writable = await handle.createWritable();
+        await writable.write(content);
+        await writable.close();
+      } catch (error) {
+        if (error instanceof Error && error.name !== 'AbortError') {
+          window.alert(`Could not save the file: ${error.message}`);
+        }
+      }
+      return;
+    }
+
+    // Fallback for browsers without the File System Access API: this can
+    // still let the user name the file (and, depending on browser settings,
+    // choose where it goes), just via the browser's own save dialog.
+    downloadTextFile(suggestedName, content);
+  };
+
+  const handleLoad = async () => {
+    if (window.showOpenFilePicker) {
+      try {
+        const [handle] = await window.showOpenFilePicker({
+          types: [
+            {
+              description: 'GaussianLab table',
+              accept: { 'text/plain': [GAUSSIAN_FILE_EXTENSION] },
+            },
+          ],
+          multiple: false,
+        });
+        const file = await handle.getFile();
+        applyLoadedFile(await file.text());
+      } catch (error) {
+        if (error instanceof Error && error.name !== 'AbortError') {
+          window.alert(`Could not open the file: ${error.message}`);
+        }
+      }
+      return;
+    }
+
+    fileInputRef.current?.click();
+  };
+
+  const handleFileInputChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) {
+      return;
+    }
+    file.text().then(applyLoadedFile);
+  };
 
   // Both cavities and target objects can serve as a mode-matching target,
   // and both are valid selections for the auto-optimizer.
@@ -91,6 +193,12 @@ export function Sidebar() {
     dispatch({ type: 'SET_SELECTED_COMPONENT', payload: { componentId: target.id } });
   };
 
+  const addBeamStop = () => {
+    const beamStop = createBeamStopComponent(state.components, defaultPlacement.position);
+    dispatch({ type: 'ADD_COMPONENT', payload: beamStop });
+    dispatch({ type: 'SET_SELECTED_COMPONENT', payload: { componentId: beamStop.id } });
+  };
+
   const setSelectedAsTarget = () => {
     const component = state.components[selectedTargetId];
     if (!component) {
@@ -111,6 +219,32 @@ export function Sidebar() {
 
   return (
     <aside className="sidebar" aria-label="Simulation controls">
+      <section className="panel file-toolbar-panel">
+        <div className="file-toolbar">
+          <span className="file-toolbar-label">Table file</span>
+          <div className="file-toolbar-actions">
+            <button type="button" onClick={handleSave}>Save</button>
+            <button type="button" onClick={handleLoad}>Load</button>
+            <details className="help-popout">
+              <summary aria-label="Open help">
+                <img className="icon-glyph" src={helpIcon} alt="" />
+              </summary>
+              <div>
+                Save writes the whole table layout to a plain-text .gaussian file. Load replaces
+                everything currently on the table with what's in the chosen file.
+              </div>
+            </details>
+          </div>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept={GAUSSIAN_FILE_EXTENSION}
+            style={{ display: 'none' }}
+            onChange={handleFileInputChange}
+          />
+        </div>
+      </section>
+
       <section className="panel">
         <header className="panel-header">
           <div>
@@ -132,6 +266,7 @@ export function Sidebar() {
             <button type="button" onClick={addLens}>+ Lens</button>
             <button type="button" onClick={addCavity}>+ Cavity</button>
             <button type="button" onClick={addTarget}>+ Target</button>
+            <button type="button" onClick={addBeamStop}>+ Beam Stop</button>
           </div>
           <div className="component-table-wrap">
             <table className="component-table">
@@ -453,6 +588,10 @@ function renderPropertyCell(
     );
   }
 
+  if (component.kind === 'beam_stop') {
+    return null;
+  }
+
   return (
     <input
       type="text"
@@ -486,6 +625,7 @@ function shortKind(kind: OpticalComponent['kind']) {
   if (kind === 'mirror_flat') return 'mir';
   if (kind === 'lens_thin') return 'lens';
   if (kind === 'target') return 'tgt';
+  if (kind === 'beam_stop') return 'stop';
   return 'cav';
 }
 

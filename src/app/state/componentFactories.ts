@@ -1,4 +1,5 @@
 import type {
+  BeamStopComponent,
   CavityFPComponent,
   FlatMirrorComponent,
   LensThinComponent,
@@ -101,6 +102,19 @@ export function createTargetComponent(
     label: nextLabel('T', countComponentsByKind(components, 'target')),
     waistRadius: 0.4,
     showProjection: false,
+  };
+}
+
+export function createBeamStopComponent(
+  components: Record<string, OpticalComponent> = {},
+  position: Point2d = { x: 0, y: 0 },
+): BeamStopComponent {
+  return {
+    id: buildComponentId('beam-stop'),
+    kind: 'beam_stop',
+    position,
+    locked: false,
+    label: nextLabel('BS', countComponentsByKind(components, 'beam_stop')),
   };
 }
 
