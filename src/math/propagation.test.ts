@@ -214,6 +214,184 @@ describe('Propagation Engine', () => {
     });
   });
 
+  describe('custom object (dielectric slab) propagation', () => {
+    it('reduces optical path to the equivalent free-space distance t/n when index of refraction != 1', () => {
+      const q0 = { re: 0, im: 10 };
+      const thicknessMm = 100;
+      const n = 2;
+
+      const inputWithSlab: PropagationEngineInput = {
+        q0,
+        wavelengthMetres: WAVELENGTH_M,
+        segments: [
+          {
+            distance: 0,
+            abcdMatrix: { A: 1, B: 0, C: 0, D: 1 },
+            componentId: 'OBJ1',
+            componentKind: 'custom_object',
+            customObjectIndexOfRefraction: n,
+            customObjectThicknessMm: thicknessMm,
+          },
+          {
+            // The segment following the object spans its full physical
+            // thickness as ordinary free space; the boundary correction
+            // above is what reduces that to the correct optical path.
+            distance: thicknessMm,
+            abcdMatrix: { A: 1, B: thicknessMm, C: 0, D: 1 },
+            componentId: null,
+          },
+        ],
+        componentZMap: { OBJ1: 0 },
+      };
+
+      const equivalentFreeSpace: PropagationEngineInput = {
+        q0,
+        wavelengthMetres: WAVELENGTH_M,
+        segments: [
+          {
+            distance: thicknessMm / n,
+            abcdMatrix: { A: 1, B: thicknessMm / n, C: 0, D: 1 },
+            componentId: null,
+          },
+        ],
+        componentZMap: {},
+      };
+
+      const withSlab = engine.propagateBeam(inputWithSlab);
+      const baseline = engine.propagateBeam(equivalentFreeSpace);
+
+      expect(withSlab.qFinal.re).toBeCloseTo(baseline.qFinal.re, 6);
+      expect(withSlab.qFinal.im).toBeCloseTo(baseline.qFinal.im, 6);
+    });
+
+    it('is optically transparent (no correction applied) when index of refraction is 1', () => {
+      const q0 = { re: 0, im: 10 };
+      const thicknessMm = 100;
+
+      const inputWithInertObject: PropagationEngineInput = {
+        q0,
+        wavelengthMetres: WAVELENGTH_M,
+        segments: [
+          {
+            distance: 0,
+            abcdMatrix: { A: 1, B: 0, C: 0, D: 1 },
+            componentId: 'OBJ1',
+            componentKind: 'custom_object',
+            customObjectIndexOfRefraction: 1,
+            customObjectThicknessMm: thicknessMm,
+          },
+          {
+            distance: thicknessMm,
+            abcdMatrix: { A: 1, B: thicknessMm, C: 0, D: 1 },
+            componentId: null,
+          },
+        ],
+        componentZMap: { OBJ1: 0 },
+      };
+
+      const plainFreeSpace: PropagationEngineInput = {
+        q0,
+        wavelengthMetres: WAVELENGTH_M,
+        segments: [
+          {
+            distance: thicknessMm,
+            abcdMatrix: { A: 1, B: thicknessMm, C: 0, D: 1 },
+            componentId: null,
+          },
+        ],
+        componentZMap: {},
+      };
+
+      const withInertObject = engine.propagateBeam(inputWithInertObject);
+      const baseline = engine.propagateBeam(plainFreeSpace);
+
+      expect(withInertObject.qFinal.re).toBeCloseTo(baseline.qFinal.re, 9);
+      expect(withInertObject.qFinal.im).toBeCloseTo(baseline.qFinal.im, 9);
+    });
+  });
+
+  describe('Gouy phase', () => {
+    it('reports atan(z/zR) relative to a waist at the start of free space', () => {
+      const waist_mm = 0.05;
+      const zRMm = rayleighRange(waist_mm / 1000, WAVELENGTH_M) * 1000;
+      const q0 = { re: 0, im: zRMm }; // at the waist
+
+      const input: PropagationEngineInput = {
+        q0,
+        wavelengthMetres: WAVELENGTH_M,
+        segments: [
+          {
+            distance: zRMm,
+            abcdMatrix: { A: 1, B: zRMm, C: 0, D: 1 },
+            componentId: null,
+          },
+        ],
+        componentZMap: {},
+      };
+
+      const result = engine.propagateBeam(input);
+
+      expect(result.profile[0].gouyPhaseDeg).toBeCloseTo(0, 6);
+      const lastPoint = result.profile[result.profile.length - 1];
+      expect(lastPoint.z).toBeCloseTo(zRMm, 3);
+      // One Rayleigh range from the waist, the Gouy phase is exactly 45 deg.
+      expect(lastPoint.gouyPhaseDeg).toBeCloseTo(45, 1);
+    });
+
+    it('does not introduce an artificial phase jump when crossing a thin lens', () => {
+      // A thin lens reshapes curvature (its ABCD matrix has B=0), which
+      // contributes zero *additional* Gouy phase at the crossing itself -
+      // the accumulated phase should stay continuous there, unlike a naive
+      // per-segment atan(re/im) that re-bases to the lens's new q and would
+      // show a large discontinuous jump.
+      const q0 = { re: 0, im: 10 };
+      const input: PropagationEngineInput = {
+        q0,
+        wavelengthMetres: WAVELENGTH_M,
+        segments: [
+          {
+            distance: 100,
+            abcdMatrix: { A: 1, B: 100, C: 0, D: 1 },
+            componentId: 'L1',
+            componentKind: 'lens_thin',
+            lensFocalLengthMm: 75,
+          },
+          {
+            distance: 50,
+            abcdMatrix: { A: 1, B: 50, C: 0, D: 1 },
+            componentId: null,
+          },
+        ],
+        componentZMap: { L1: 100 },
+      };
+
+      const result = engine.propagateBeam(input);
+      const justBeforeLens = result.profile.find((p) => Math.abs(p.z - 100) < 1e-6);
+      const justAfterLens = result.profile.find((p) => Math.abs(p.z - 105) < 1e-6);
+
+      expect(justBeforeLens).toBeDefined();
+      expect(justAfterLens).toBeDefined();
+      expect(Math.abs(justAfterLens!.gouyPhaseDeg - justBeforeLens!.gouyPhaseDeg)).toBeLessThan(5);
+    });
+
+    it('accumulates monotonically through a simple diverging free-space stretch', () => {
+      const q0 = { re: 0, im: 10 };
+      const input: PropagationEngineInput = {
+        q0,
+        wavelengthMetres: WAVELENGTH_M,
+        segments: [{ distance: 200, abcdMatrix: { A: 1, B: 200, C: 0, D: 1 }, componentId: null }],
+        componentZMap: {},
+      };
+
+      const result = engine.propagateBeam(input);
+      let previous = result.profile[0].gouyPhaseDeg;
+      for (let i = 1; i < result.profile.length; i += 1) {
+        expect(result.profile[i].gouyPhaseDeg).toBeGreaterThanOrEqual(previous - 1e-9);
+        previous = result.profile[i].gouyPhaseDeg;
+      }
+    });
+  });
+
   describe('cavity checkpoint mode filtering', () => {
     it('continues downstream profile for cavity coupling above the default 25% threshold', () => {
       const q0 = { re: -100, im: 10 };

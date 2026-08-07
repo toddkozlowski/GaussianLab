@@ -1,25 +1,29 @@
 import { useMemo, useRef, useState } from 'react';
-import type { ChangeEvent } from 'react';
+import type { ChangeEvent, ReactNode } from 'react';
 import { useAppStore } from '../adapters/useAppStore';
 import {
   createBeamStopComponent,
   createCavityFPComponent,
+  createCustomObjectComponent,
   createFlatMirrorComponent,
   createLensThinComponent,
   createSourceComponent,
   createTargetComponent,
 } from '../state/componentFactories';
 import type { AppState, CardinalDirection, OpticalComponent, Point2d, TargetMode } from '../state/schema';
-import { computeDangerousPairs, getComponentPathPosition } from '../state';
+import {
+  computeDangerousPairs,
+  getComponentPathPosition,
+  moveComponentToPathZ,
+  DANGEROUS_PROXIMITY_THRESHOLD_MM,
+} from '../state';
+import { snapPointToGrid } from '../state/snapToGrid';
 import { GAUSSIAN_FILE_EXTENSION, parseAppState, serializeAppState } from '../state/fileFormat';
 import { handleCaretStepKeyDown } from '../../ui/shared/numericCaretStep';
 import chevronDownIcon from '../../../icons/circle-chevron-down.svg';
 import chevronUpIcon from '../../../icons/circle-chevron-up.svg';
+import circlePlusIcon from '../../../icons/circle-plus.svg';
 import helpIcon from '../../../icons/circle-question-mark.svg';
-import lockIcon from '../../../icons/lock.svg';
-import lockOpenIcon from '../../../icons/lock-open.svg';
-import eyeIcon from '../../../icons/eye.svg';
-import eyeOffIcon from '../../../icons/eye-off.svg';
 import trashIcon from '../../../icons/trash-2.svg';
 import warningIcon from '../../../icons/triangle-alert.svg';
 
@@ -44,15 +48,8 @@ function downloadTextFile(filename: string, content: string) {
   URL.revokeObjectURL(url);
 }
 
-function hasProjectionToggle(
-  component: OpticalComponent
-): component is Extract<OpticalComponent, { kind: 'cavity_fp' | 'target' }> {
-  return component.kind === 'cavity_fp' || component.kind === 'target';
-}
-
 export function Sidebar() {
-  const { state, dispatch, runSolver, previewSolution, applySolution } = useAppStore();
-  const [selectedTargetId, setSelectedTargetId] = useState<string>('');
+  const { state, dispatch, runSolver, previewSolution, applySolution, resetTable } = useAppStore();
   const [modeMatchingOpen, setModeMatchingOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -124,6 +121,15 @@ export function Sidebar() {
     fileInputRef.current?.click();
   };
 
+  const handleClearTable = () => {
+    const confirmed = window.confirm(
+      'Clear the table? This removes every component and cannot be undone.',
+    );
+    if (confirmed) {
+      resetTable();
+    }
+  };
+
   const handleFileInputChange = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     event.target.value = '';
@@ -143,7 +149,10 @@ export function Sidebar() {
     [state.components]
   );
 
-  const dangerousPairs = useMemo(() => computeDangerousPairs(state.components, 10), [state.components]);
+  const dangerousPairs = useMemo(
+    () => computeDangerousPairs(state.components, state.sourceId, state.beamPath, DANGEROUS_PROXIMITY_THRESHOLD_MM),
+    [state.components, state.sourceId, state.beamPath],
+  );
   const proximityByComponent = useMemo(() => {
     const map: Record<string, Array<{ otherLabel: string; distanceMm: number }>> = {};
     for (const pair of dangerousPairs) {
@@ -158,16 +167,22 @@ export function Sidebar() {
   const orderedComponents = useMemo(() => getOrderedComponents(state), [state]);
   const hasSolvedSource = !!state.sourceId && state.components[state.sourceId]?.kind === 'source';
   const defaultPlacement = getDefaultPlacement(state);
+  // Source and mirror positions are freely grid-snapped (see Canvas.normalizePosition);
+  // lens/cavity/target/beam-stop instead prioritize sitting on the beam axis, so their
+  // defaultPlacement.position is left as computed rather than snapped here too.
+  const gridSnappedDefaultPosition = state.table.snapToGrid
+    ? snapPointToGrid(defaultPlacement.position, state.table.gridStandard)
+    : defaultPlacement.position;
 
   const addSource = () => {
-    const source = createSourceComponent(state.components, defaultPlacement.position);
+    const source = createSourceComponent(state.components, gridSnappedDefaultPosition);
     dispatch({ type: 'ADD_COMPONENT', payload: source });
     dispatch({ type: 'SET_SOURCE_ID', payload: { sourceId: source.id } });
     dispatch({ type: 'SET_SELECTED_COMPONENT', payload: { componentId: source.id } });
   };
 
   const addMirror = () => {
-    const mirror = createFlatMirrorComponent(state.components, defaultPlacement.position);
+    const mirror = createFlatMirrorComponent(state.components, gridSnappedDefaultPosition);
     dispatch({ type: 'ADD_COMPONENT', payload: mirror });
     dispatch({ type: 'SET_SELECTED_COMPONENT', payload: { componentId: mirror.id } });
   };
@@ -199,9 +214,18 @@ export function Sidebar() {
     dispatch({ type: 'SET_SELECTED_COMPONENT', payload: { componentId: beamStop.id } });
   };
 
-  const setSelectedAsTarget = () => {
-    const component = state.components[selectedTargetId];
+  const addCustomObject = () => {
+    const customObject = createCustomObjectComponent(state.components, defaultPlacement.position);
+    dispatch({ type: 'ADD_COMPONENT', payload: customObject });
+    dispatch({ type: 'SET_SELECTED_COMPONENT', payload: { componentId: customObject.id } });
+  };
+
+  // Selecting a component from the dropdown implicitly primes it as the
+  // mode-matching target - there's no separate confirmation step.
+  const selectTargetMode = (componentId: string) => {
+    const component = state.components[componentId];
     if (!component) {
+      dispatch({ type: 'SET_TARGET_MODE', payload: { targetMode: null } });
       return;
     }
 
@@ -217,6 +241,13 @@ export function Sidebar() {
     dispatch({ type: 'SET_TARGET_MODE', payload: { targetMode } });
   };
 
+  const selectedTargetId =
+    state.targetMode?.kind === 'cavity'
+      ? state.targetMode.cavityComponentId
+      : state.targetMode?.kind === 'target'
+        ? state.targetMode.targetComponentId
+        : '';
+
   return (
     <aside className="sidebar" aria-label="Simulation controls">
       <section className="panel file-toolbar-panel">
@@ -225,13 +256,24 @@ export function Sidebar() {
           <div className="file-toolbar-actions">
             <button type="button" onClick={handleSave}>Save</button>
             <button type="button" onClick={handleLoad}>Load</button>
+            <button
+              type="button"
+              className="icon-button danger-button"
+              aria-label="Clear table"
+              title="Clear table"
+              onClick={handleClearTable}
+            >
+              <img className="icon-glyph" src={trashIcon} alt="" />
+            </button>
             <details className="help-popout">
               <summary aria-label="Open help">
                 <img className="icon-glyph" src={helpIcon} alt="" />
               </summary>
               <div>
                 Save writes the whole table layout to a plain-text .gaussian file. Load replaces
-                everything currently on the table with what's in the chosen file.
+                everything currently on the table with what's in the chosen file. Clear (trash
+                icon) resets the table to a blank default after confirmation. The table layout is
+                also autosaved locally, so a refresh or reopening the tab won't lose your work.
               </div>
             </details>
           </div>
@@ -267,19 +309,20 @@ export function Sidebar() {
             <button type="button" onClick={addCavity}>+ Cavity</button>
             <button type="button" onClick={addTarget}>+ Target</button>
             <button type="button" onClick={addBeamStop}>+ Beam Stop</button>
+            <button type="button" onClick={addCustomObject}>+ Custom Object</button>
           </div>
           <div className="component-table-wrap">
             <table className="component-table">
               <thead>
                 <tr>
                   <th>Lbl</th>
-                  <th>Kind</th>
-                  <th>Z</th>
+                  <th>Type</th>
+                  <th><ColumnTitle title="Z" unit="mm" /></th>
                   <th>Prop</th>
-                  <th>Proj</th>
-                  <th>Lock</th>
-                  <th>Del</th>
-                  <th>Warn</th>
+                  <th><ColumnTitle title="Sensitivity" unit="%/mm²" /></th>
+                  <th className="icon-col"></th>
+                  <th className="icon-col"></th>
+                  <th className="icon-col"></th>
                 </tr>
               </thead>
               <tbody>
@@ -307,7 +350,9 @@ export function Sidebar() {
                     >
                       <td>
                         <input
+                          className="label-cell-input"
                           value={component.label}
+                          disabled={component.locked}
                           onChange={(event) => {
                             event.stopPropagation();
                             dispatch({
@@ -318,29 +363,12 @@ export function Sidebar() {
                         />
                       </td>
                       <td>{shortKind(component.kind)}</td>
-                      <td>
-                        <span className="path-position-cell">{formatPathPosition(pathPosition)}</span>
-                      </td>
+                      <td>{renderZCell(component, pathPosition, state, dispatch)}</td>
                       <td>{renderPropertyCell(component, dispatch)}</td>
                       <td>
-                        {hasProjectionToggle(component) && (
-                          <button
-                            type="button"
-                            className="icon-button"
-                            aria-label={component.showProjection ? 'Hide mode projection' : 'Show mode projection'}
-                            onClick={(event) => {
-                              event.stopPropagation();
-                              dispatch({
-                                type: 'UPDATE_COMPONENT',
-                                payload: { id: component.id, updates: { showProjection: !component.showProjection } },
-                              });
-                            }}
-                          >
-                            <img className="icon-glyph" src={component.showProjection ? eyeIcon : eyeOffIcon} alt="" />
-                          </button>
-                        )}
+                        <span className="sensitivity-cell">{formatSensitivity(component)}</span>
                       </td>
-                      <td>
+                      <td className="icon-col">
                         <button
                           type="button"
                           className="icon-button"
@@ -363,7 +391,7 @@ export function Sidebar() {
                           <LockIcon locked={component.locked} />
                         </button>
                       </td>
-                      <td>
+                      <td className="icon-col">
                         <button
                           type="button"
                           className="icon-button danger-button"
@@ -376,7 +404,7 @@ export function Sidebar() {
                           <img className="icon-glyph" src={trashIcon} alt="" />
                         </button>
                       </td>
-                      <td>
+                      <td className="icon-col">
                         {warningMessages.length > 0 && (
                           <button
                             type="button"
@@ -421,7 +449,7 @@ export function Sidebar() {
                 Target
                 <select
                   value={selectedTargetId}
-                  onChange={(event) => setSelectedTargetId(event.target.value)}
+                  onChange={(event) => selectTargetMode(event.target.value)}
                 >
                   <option value="">Select cavity or target...</option>
                   {targetableComponents.map((component) => (
@@ -431,9 +459,109 @@ export function Sidebar() {
                   ))}
                 </select>
               </label>
-              <button type="button" onClick={setSelectedAsTarget} disabled={!selectedTargetId}>
-                Use as mode-matching target
-              </button>
+
+              <label className="mode-matching-inline-toggle">
+                <input
+                  type="checkbox"
+                  checked={state.optimiser.avoidCollisions}
+                  onChange={(event) =>
+                    dispatch({
+                      type: 'SET_AVOID_COLLISIONS',
+                      payload: { avoidCollisions: event.target.checked },
+                    })
+                  }
+                />
+                Avoid collisions
+              </label>
+
+              <label className="mode-matching-inline-toggle">
+                <input
+                  type="checkbox"
+                  checked={state.optimiser.manualRangesEnabled}
+                  onChange={(event) =>
+                    dispatch({
+                      type: 'SET_MANUAL_RANGES_ENABLED',
+                      payload: { enabled: event.target.checked },
+                    })
+                  }
+                />
+                Manual adjustment ranges
+              </label>
+
+              {state.optimiser.manualRangesEnabled && (
+                <div className="manual-range-list">
+                  {state.optimiser.manualRanges.map((range) => (
+                    <div className="manual-range-row" key={range.id}>
+                      <label className="manual-range-field">
+                        Start (mm)
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={formatFixed3(range.startZMm)}
+                          onChange={(event) => {
+                            const value = Number(event.target.value);
+                            if (Number.isFinite(value)) {
+                              dispatch({
+                                type: 'UPDATE_MANUAL_RANGE',
+                                payload: { id: range.id, updates: { startZMm: value } },
+                              });
+                            }
+                          }}
+                          onKeyDown={(event) =>
+                            handleCaretStepKeyDown(event, (value) =>
+                              dispatch({
+                                type: 'UPDATE_MANUAL_RANGE',
+                                payload: { id: range.id, updates: { startZMm: value } },
+                              }),
+                            )
+                          }
+                        />
+                      </label>
+                      <label className="manual-range-field">
+                        Stop (mm)
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={formatFixed3(range.endZMm)}
+                          onChange={(event) => {
+                            const value = Number(event.target.value);
+                            if (Number.isFinite(value)) {
+                              dispatch({
+                                type: 'UPDATE_MANUAL_RANGE',
+                                payload: { id: range.id, updates: { endZMm: value } },
+                              });
+                            }
+                          }}
+                          onKeyDown={(event) =>
+                            handleCaretStepKeyDown(event, (value) =>
+                              dispatch({
+                                type: 'UPDATE_MANUAL_RANGE',
+                                payload: { id: range.id, updates: { endZMm: value } },
+                              }),
+                            )
+                          }
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        className="icon-button danger-button"
+                        aria-label="Remove tuning range"
+                        onClick={() => dispatch({ type: 'REMOVE_MANUAL_RANGE', payload: { id: range.id } })}
+                      >
+                        <img className="icon-glyph" src={trashIcon} alt="" />
+                      </button>
+                    </div>
+                  ))}
+                  <button
+                    type="button"
+                    className="icon-button"
+                    aria-label="Add another tuning range"
+                    onClick={() => dispatch({ type: 'ADD_MANUAL_RANGE', payload: {} })}
+                  >
+                    <img className="icon-glyph" src={circlePlusIcon} alt="" />
+                  </button>
+                </div>
+              )}
 
               <button type="button" onClick={() => runSolver(5)}>Run optimizer</button>
 
@@ -477,114 +605,203 @@ export function Sidebar() {
   );
 }
 
+/** A two-line column header: the title, with its unit on a second line below. */
+function ColumnTitle({ title, unit }: { title: string; unit: string }) {
+  return (
+    <span className="column-title">
+      <span>{title}</span>
+      <span className="column-title-unit">({unit})</span>
+    </span>
+  );
+}
+
+/** Wraps a Prop-column input/select with its parameter symbol and unit, e.g. "f=" ... "mm". */
+function PropField({
+  prefix,
+  suffix,
+  children,
+}: {
+  prefix: string;
+  suffix?: string;
+  children: ReactNode;
+}) {
+  return (
+    <span className="prop-field">
+      <span className="prop-field-affix">{prefix}</span>
+      {children}
+      {suffix && <span className="prop-field-affix">{suffix}</span>}
+    </span>
+  );
+}
+
+/**
+ * The Z column is editable for every kind except mirrors: typing a new value
+ * slides the component to that position along the beam path (mirrors are
+ * excluded because repositioning one also reshapes every downstream segment,
+ * so a single z isn't a well-defined edit for them).
+ */
+function renderZCell(
+  component: OpticalComponent,
+  pathPosition: number | null,
+  state: AppState,
+  dispatch: ReturnType<typeof useAppStore>['dispatch'],
+) {
+  if (component.kind === 'mirror_flat') {
+    return <span className="path-position-cell">{formatPathPosition(pathPosition)}</span>;
+  }
+
+  const commitZ = (value: number) => {
+    const position = moveComponentToPathZ(state, component.id, value);
+    if (position) {
+      dispatch({ type: 'UPDATE_COMPONENT', payload: { id: component.id, updates: { position } } });
+    }
+  };
+
+  return (
+    <input
+      className="z-cell-input"
+      type="text"
+      inputMode="decimal"
+      disabled={component.locked}
+      value={pathPosition === null ? '' : formatFixed3(pathPosition)}
+      placeholder={pathPosition === null ? 'off-path' : undefined}
+      onChange={(event) => {
+        event.stopPropagation();
+        const value = Number(event.target.value);
+        if (Number.isFinite(value)) {
+          commitZ(value);
+        }
+      }}
+      onKeyDown={(event) =>
+        handleCaretStepKeyDown(event, (value) => {
+          event.stopPropagation();
+          commitZ(value);
+        })
+      }
+    />
+  );
+}
+
 function renderPropertyCell(
   component: OpticalComponent,
   dispatch: ReturnType<typeof useAppStore>['dispatch']
 ) {
   if (component.kind === 'source') {
     return (
-      <input
-        type="text"
-        inputMode="decimal"
-        value={Math.round(component.waistRadius * 1000)}
-        onChange={(event) => {
-          event.stopPropagation();
-          const value = Number(event.target.value);
-          if (Number.isFinite(value)) {
-            dispatch({
-              type: 'UPDATE_COMPONENT',
-              payload: { id: component.id, updates: { waistRadius: Math.max(1, value) / 1000 } },
-            });
-          }
-        }}
-        onKeyDown={(event) =>
-          handleCaretStepKeyDown(event, (value) => {
+      <PropField prefix="w₀=" suffix="um">
+        <input
+          type="text"
+          inputMode="decimal"
+          disabled={component.locked}
+          value={Math.round(component.waistRadius * 1000)}
+          onChange={(event) => {
             event.stopPropagation();
-            dispatch({
-              type: 'UPDATE_COMPONENT',
-              payload: { id: component.id, updates: { waistRadius: Math.max(1, value) / 1000 } },
-            });
-          })
-        }
-      />
+            const value = Number(event.target.value);
+            if (Number.isFinite(value)) {
+              dispatch({
+                type: 'UPDATE_COMPONENT',
+                payload: { id: component.id, updates: { waistRadius: Math.max(1, value) / 1000 } },
+              });
+            }
+          }}
+          onKeyDown={(event) =>
+            handleCaretStepKeyDown(event, (value) => {
+              event.stopPropagation();
+              dispatch({
+                type: 'UPDATE_COMPONENT',
+                payload: { id: component.id, updates: { waistRadius: Math.max(1, value) / 1000 } },
+              });
+            })
+          }
+        />
+      </PropField>
     );
   }
 
   if (component.kind === 'lens_thin') {
     return (
-      <input
-        type="text"
-        inputMode="decimal"
-        value={formatFixed3(component.focalLength)}
-        onChange={(event) => {
-          event.stopPropagation();
-          const value = Number(event.target.value);
-          if (Number.isFinite(value)) {
-            dispatch({
-              type: 'UPDATE_COMPONENT',
-              payload: { id: component.id, updates: { focalLength: value } },
-            });
-          }
-        }}
-        onKeyDown={(event) =>
-          handleCaretStepKeyDown(event, (value) => {
+      <PropField prefix="f=" suffix="mm">
+        <input
+          type="text"
+          inputMode="decimal"
+          disabled={component.locked}
+          value={formatFixed3(component.focalLength)}
+          onChange={(event) => {
             event.stopPropagation();
-            dispatch({
-              type: 'UPDATE_COMPONENT',
-              payload: { id: component.id, updates: { focalLength: value } },
-            });
-          })
-        }
-      />
+            const value = Number(event.target.value);
+            if (Number.isFinite(value)) {
+              dispatch({
+                type: 'UPDATE_COMPONENT',
+                payload: { id: component.id, updates: { focalLength: value } },
+              });
+            }
+          }}
+          onKeyDown={(event) =>
+            handleCaretStepKeyDown(event, (value) => {
+              event.stopPropagation();
+              dispatch({
+                type: 'UPDATE_COMPONENT',
+                payload: { id: component.id, updates: { focalLength: value } },
+              });
+            })
+          }
+        />
+      </PropField>
     );
   }
 
   if (component.kind === 'mirror_flat') {
     return (
-      <select
-        value={component.orientation}
-        onChange={(event) => {
-          event.stopPropagation();
-          dispatch({
-            type: 'UPDATE_COMPONENT',
-            payload: { id: component.id, updates: { orientation: Number(event.target.value) as 45 | 135 | 225 | 315 } },
-          });
-        }}
-      >
-        <option value={45}>45</option>
-        <option value={135}>135</option>
-        <option value={225}>225</option>
-        <option value={315}>315</option>
-      </select>
+      <PropField prefix="θ=" suffix="°">
+        <select
+          value={component.orientation}
+          disabled={component.locked}
+          onChange={(event) => {
+            event.stopPropagation();
+            dispatch({
+              type: 'UPDATE_COMPONENT',
+              payload: { id: component.id, updates: { orientation: Number(event.target.value) as 45 | 135 | 225 | 315 } },
+            });
+          }}
+        >
+          <option value={45}>45</option>
+          <option value={135}>135</option>
+          <option value={225}>225</option>
+          <option value={315}>315</option>
+        </select>
+      </PropField>
     );
   }
 
   if (component.kind === 'target') {
     return (
-      <input
-        type="text"
-        inputMode="decimal"
-        value={Math.round(component.waistRadius * 1000)}
-        onChange={(event) => {
-          event.stopPropagation();
-          const value = Number(event.target.value);
-          if (Number.isFinite(value)) {
-            dispatch({
-              type: 'UPDATE_COMPONENT',
-              payload: { id: component.id, updates: { waistRadius: Math.max(1, value) / 1000 } },
-            });
-          }
-        }}
-        onKeyDown={(event) =>
-          handleCaretStepKeyDown(event, (value) => {
+      <PropField prefix="w₀=" suffix="um">
+        <input
+          type="text"
+          inputMode="decimal"
+          disabled={component.locked}
+          value={Math.round(component.waistRadius * 1000)}
+          onChange={(event) => {
             event.stopPropagation();
-            dispatch({
-              type: 'UPDATE_COMPONENT',
-              payload: { id: component.id, updates: { waistRadius: Math.max(1, value) / 1000 } },
-            });
-          })
-        }
-      />
+            const value = Number(event.target.value);
+            if (Number.isFinite(value)) {
+              dispatch({
+                type: 'UPDATE_COMPONENT',
+                payload: { id: component.id, updates: { waistRadius: Math.max(1, value) / 1000 } },
+              });
+            }
+          }}
+          onKeyDown={(event) =>
+            handleCaretStepKeyDown(event, (value) => {
+              event.stopPropagation();
+              dispatch({
+                type: 'UPDATE_COMPONENT',
+                payload: { id: component.id, updates: { waistRadius: Math.max(1, value) / 1000 } },
+              });
+            })
+          }
+        />
+      </PropField>
     );
   }
 
@@ -592,31 +809,66 @@ function renderPropertyCell(
     return null;
   }
 
+  if (component.kind === 'custom_object') {
+    return (
+      <PropField prefix="n=">
+        <input
+          type="text"
+          inputMode="decimal"
+          disabled={component.locked}
+          value={formatFixed3(component.indexOfRefraction)}
+          onChange={(event) => {
+            event.stopPropagation();
+            const value = Number(event.target.value);
+            if (Number.isFinite(value)) {
+              dispatch({
+                type: 'UPDATE_COMPONENT',
+                payload: { id: component.id, updates: { indexOfRefraction: Math.max(0.01, value) } },
+              });
+            }
+          }}
+          onKeyDown={(event) =>
+            handleCaretStepKeyDown(event, (value) => {
+              event.stopPropagation();
+              dispatch({
+                type: 'UPDATE_COMPONENT',
+                payload: { id: component.id, updates: { indexOfRefraction: Math.max(0.01, value) } },
+              });
+            })
+          }
+        />
+      </PropField>
+    );
+  }
+
   return (
-    <input
-      type="text"
-      inputMode="decimal"
-      value={formatFixed3(component.length)}
-      onChange={(event) => {
-        event.stopPropagation();
-        const value = Number(event.target.value);
-        if (Number.isFinite(value)) {
-          dispatch({
-            type: 'UPDATE_COMPONENT',
-            payload: { id: component.id, updates: { length: Math.max(1, value) } },
-          });
-        }
-      }}
-      onKeyDown={(event) =>
-        handleCaretStepKeyDown(event, (value) => {
+    <PropField prefix="L=" suffix="mm">
+      <input
+        type="text"
+        inputMode="decimal"
+        disabled={component.locked}
+        value={formatFixed3(component.length)}
+        onChange={(event) => {
           event.stopPropagation();
-          dispatch({
-            type: 'UPDATE_COMPONENT',
-            payload: { id: component.id, updates: { length: Math.max(1, value) } },
-          });
-        })
-      }
-    />
+          const value = Number(event.target.value);
+          if (Number.isFinite(value)) {
+            dispatch({
+              type: 'UPDATE_COMPONENT',
+              payload: { id: component.id, updates: { length: Math.max(1, value) } },
+            });
+          }
+        }}
+        onKeyDown={(event) =>
+          handleCaretStepKeyDown(event, (value) => {
+            event.stopPropagation();
+            dispatch({
+              type: 'UPDATE_COMPONENT',
+              payload: { id: component.id, updates: { length: Math.max(1, value) } },
+            });
+          })
+        }
+      />
+    </PropField>
   );
 }
 
@@ -626,6 +878,7 @@ function shortKind(kind: OpticalComponent['kind']) {
   if (kind === 'lens_thin') return 'lens';
   if (kind === 'target') return 'tgt';
   if (kind === 'beam_stop') return 'stop';
+  if (kind === 'custom_object') return 'obj';
   return 'cav';
 }
 
@@ -636,8 +889,24 @@ function formatFixed3(value: number): string {
   return value.toFixed(3);
 }
 
+// Inline (rather than <img src="...svg">) so the locked state can recolor the
+// stroke via currentColor - an <img>-loaded SVG can't be restyled from the
+// embedding page's CSS.
 function LockIcon({ locked }: { locked: boolean }) {
-  return <img className="icon-glyph" src={locked ? lockIcon : lockOpenIcon} alt="" />;
+  return (
+    <svg
+      className={locked ? 'icon-glyph lock-icon-locked' : 'icon-glyph'}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <rect width="18" height="11" x="3" y="11" rx="2" ry="2" />
+      {locked ? <path d="M7 11V7a5 5 0 0 1 10 0v4" /> : <path d="M7 11V7a5 5 0 0 1 9.9-1" />}
+    </svg>
+  );
 }
 
 function getOrderedComponents(state: AppState): OpticalComponent[] {
@@ -668,6 +937,14 @@ function getOrderedComponents(state: AppState): OpticalComponent[] {
 
 function formatPathPosition(value: number | null): string {
   return value === null ? 'off-path' : formatFixed3(value);
+}
+
+/** Only lenses carry a position-sensitivity figure; everything else is blank. */
+function formatSensitivity(component: OpticalComponent): string {
+  if (component.kind !== 'lens_thin' || component.sensitivity === null) {
+    return '—'; // em dash
+  }
+  return `${formatFixed3(component.sensitivity)} %/mm²`;
 }
 
 function clamp(value: number, min: number, max: number): number {

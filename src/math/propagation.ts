@@ -37,7 +37,20 @@ export class ConcreteBeamPropagationEngine implements PropagationEngine {
     let qCurrent = q0_SI;
     let z_current = 0; // Absolute position in system
 
-    const profile: Array<{ z: number; w: number }> = []; // in mm
+    // Accumulated (unwrapped) Gouy phase, tracked continuously across the
+    // whole path. Within any pure free-space stretch - which includes a
+    // custom-object slab's segment, since its correction only ever shifts
+    // Re(q) - Im(q) is invariant, so atan(Re(q)/Im(q)) is exactly the local
+    // Gouy phase and its delta across the stretch is exact. A thin lens
+    // contributes zero *additional* Gouy phase at the instant it's crossed
+    // (its ABCD matrix has B=0, so the general accumulated-phase formula
+    // -arg(A + B/q) evaluates to -arg(1) = 0) - same for the cavity-coupling
+    // substitution, which is a modelling event rather than a real optical
+    // element. So boundaries simply carry the running total forward
+    // unchanged, and each new segment resumes accumulating from its own q.
+    let gouyPhaseRad = gouyPhaseFromQ(qCurrent);
+
+    const profile: Array<{ z: number; w: number; gouyPhaseDeg: number }> = []; // in mm / degrees
     const waists: PropagationWaist[] = [];
     const qAtComponent: Record<string, ComplexNumber> = {};
     const cavityOverlap: Record<string, number> = {};
@@ -68,6 +81,9 @@ export class ConcreteBeamPropagationEngine implements PropagationEngine {
         }
       }
 
+      const segmentStartPhaseRad = gouyPhaseFromQ(qCurrent);
+      let pointGouyPhaseRad = gouyPhaseRad;
+
       const sampleCount = Math.max(1, Math.ceil(distanceM / 0.001));
       for (let i = 0; i <= sampleCount; i += 1) {
         const zLocal = (distanceM * i) / sampleCount;
@@ -75,12 +91,15 @@ export class ConcreteBeamPropagationEngine implements PropagationEngine {
           re: qCurrent.re + zLocal,
           im: qCurrent.im,
         };
+        pointGouyPhaseRad = gouyPhaseRad + (gouyPhaseFromQ(qLocal) - segmentStartPhaseRad);
 
         profile.push({
           z: (z_current + zLocal) * 1000,
           w: beamRadiusFromQ(qLocal, wavelengthMetres) * 1000,
+          gouyPhaseDeg: (pointGouyPhaseRad * 180) / Math.PI,
         });
       }
+      gouyPhaseRad = pointGouyPhaseRad;
 
       const qAtBoundary: Complex = {
         re: qCurrent.re + distanceM,
@@ -97,6 +116,25 @@ export class ConcreteBeamPropagationEngine implements PropagationEngine {
             A: 1,
             B: 0,
             C: -1000 / focalLengthMm,
+            D: 1,
+          });
+        }
+      } else if (segment.componentKind === 'custom_object') {
+        // A flat-faced dielectric slab of physical thickness t and index n has
+        // optical path t/n. The geometric segment that follows already spans
+        // the slab's full physical thickness as ordinary free space, so a
+        // single translation of -t(1 - 1/n) applied here (order-independent,
+        // since translation matrices commute) reduces that to the correct t/n
+        // once the following free-space propagation is added. At n=1 the slab
+        // is optically transparent, so no correction is applied.
+        const n = segment.customObjectIndexOfRefraction;
+        const thicknessMm = segment.customObjectThicknessMm;
+        if (typeof n === 'number' && typeof thicknessMm === 'number' && Math.abs(n - 1) > 1e-9) {
+          const reductionM = (thicknessMm / 1000) * (1 - 1 / n);
+          qAfterBoundary = propagateQ(qAtBoundary, {
+            A: 1,
+            B: -reductionM,
+            C: 0,
             D: 1,
           });
         }
@@ -172,6 +210,15 @@ export class ConcreteBeamPropagationEngine implements PropagationEngine {
       },
     };
   }
+}
+
+/**
+ * Local Gouy phase (radians) implied by q = (z - z0) + i*zR, i.e. atan((z-z0)/zR).
+ * Exact for the Re/Im of whatever q is passed in - see the accumulation
+ * comment above propagateBeam for how this is stitched across ABCD boundaries.
+ */
+function gouyPhaseFromQ(q: Complex): number {
+  return Math.atan(q.re / q.im);
 }
 
 function beamRadiusFromQ(q: Complex, wavelengthMetres: number): number {

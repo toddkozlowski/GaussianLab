@@ -14,11 +14,11 @@ describe('Layer 5 solver workflow', () => {
     // Expand mode-matching controls (collapsed by default).
     fireEvent.click(screen.getByRole('button', { name: 'Expand mode matching' }));
 
-    // Select the target object and configure it as the mode-matching target.
+    // Selecting the target object from the dropdown implicitly primes it as
+    // the mode-matching target - no separate confirmation button.
     const targetSelect = screen.getByRole('combobox');
     const targetOption = within(targetSelect).getByText(/\(target\)/);
     fireEvent.change(targetSelect, { target: { value: (targetOption as HTMLOptionElement).value } });
-    fireEvent.click(screen.getByRole('button', { name: 'Use as mode-matching target' }));
 
     fireEvent.click(screen.getByRole('button', { name: 'Run optimizer' }));
 

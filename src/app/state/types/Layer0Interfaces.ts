@@ -53,6 +53,12 @@ export interface PropagationSegment {
 
   /** Minimum overlap needed to treat cavity as coupled mode output. */
   cavityCouplingThreshold?: number;
+
+  /** Custom object's index of refraction when componentKind is custom_object. */
+  customObjectIndexOfRefraction?: number;
+
+  /** Custom object's physical thickness (mm) when componentKind is custom_object. */
+  customObjectThicknessMm?: number;
 }
 
 /**

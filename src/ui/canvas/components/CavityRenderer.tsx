@@ -17,10 +17,12 @@ import type { CavityFPComponent, Point2d } from '../../../app/state/schema';
 interface CavityRendererProps {
   component: CavityFPComponent;
   mmToPx: (mm: number) => number;
+  onDragMove: (componentId: string, newPos: Point2d) => void;
   onDragEnd: (componentId: string, newPos: Point2d) => void;
   onSelect: (componentId: string) => void;
   isDraggable: boolean;
   isSelected: boolean;
+  getSnappedDragPositionPx: (component: CavityFPComponent, rawPx: Point2d) => Point2d;
 }
 
 const CONCAVE_BOW_PX = 4;
@@ -84,10 +86,12 @@ const MirrorFace: React.FC<MirrorFaceProps> = ({
 export const CavityRenderer: React.FC<CavityRendererProps> = ({
   component,
   mmToPx,
+  onDragMove,
   onDragEnd,
   onSelect,
   isDraggable,
   isSelected,
+  getSnappedDragPositionPx,
 }) => {
   const groupRef = useRef<Konva.Group>(null);
 
@@ -102,6 +106,14 @@ export const CavityRenderer: React.FC<CavityRendererProps> = ({
   // Beam travels in +x/+y for 'right'/'down', -x/-y for 'left'/'up'.
   const dirSign = component.direction === 'right' || component.direction === 'down' ? 1 : -1;
   const m2OffsetPx = dirSign * cavityLengthPx;
+
+  const handleDragMove = (e: Konva.KonvaEventObject<DragEvent>) => {
+    if (groupRef.current) {
+      const newX = groupRef.current.x() / mmToPx(1);
+      const newY = groupRef.current.y() / mmToPx(1);
+      onDragMove(component.id, { x: newX, y: newY });
+    }
+  };
 
   const handleDragEnd = (e: Konva.KonvaEventObject<DragEvent>) => {
     if (groupRef.current) {
@@ -120,6 +132,8 @@ export const CavityRenderer: React.FC<CavityRendererProps> = ({
       x={x}
       y={y}
       draggable={isDraggable}
+      dragBoundFunc={(pos) => getSnappedDragPositionPx(component, pos)}
+      onDragMove={handleDragMove}
       onDragEnd={handleDragEnd}
       onClick={() => onSelect(component.id)}
       onTap={() => onSelect(component.id)}

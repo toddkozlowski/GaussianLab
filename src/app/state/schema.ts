@@ -2,7 +2,14 @@ export type CardinalDirection = 'right' | 'left' | 'up' | 'down';
 
 export type MirrorOrientation = 45 | 135 | 225 | 315;
 
-export type ComponentKind = 'source' | 'mirror_flat' | 'lens_thin' | 'cavity_fp' | 'target' | 'beam_stop';
+export type ComponentKind =
+  | 'source'
+  | 'mirror_flat'
+  | 'lens_thin'
+  | 'cavity_fp'
+  | 'target'
+  | 'beam_stop'
+  | 'custom_object';
 
 export type GridStandard = 'metric' | 'imperial';
 
@@ -43,6 +50,14 @@ export interface LensThinComponent extends BaseComponent {
   kind: 'lens_thin';
   focalLength: number;
   optimiserCanMove: boolean;
+  /**
+   * How sharply the final mode overlap falls off for a small displacement of
+   * this lens along the beam axis - the curvature (second derivative) of
+   * overlap % with respect to position, in %/mm^2. Derived and recomputed
+   * automatically (like a cavity's eigenmode); null when there's no
+   * resolvable target mode to measure against.
+   */
+  sensitivity: number | null;
 }
 
 export interface CavityEigenmode {
@@ -84,13 +99,29 @@ export interface BeamStopComponent extends BaseComponent {
   kind: 'beam_stop';
 }
 
+/**
+ * A flat-faced dielectric slab (e.g. a window or crystal): the beam passes
+ * straight through, unaffected in direction. component.position anchors the
+ * front face; the back face sits `thickness` further downstream along the
+ * beam. Both faces are assumed strictly flat (normal incidence, no lensing).
+ * Only affects propagation when indexOfRefraction != 1 - at n=1 it's
+ * optically transparent, though its thickness still occupies physical space
+ * for collision purposes.
+ */
+export interface CustomObjectComponent extends BaseComponent {
+  kind: 'custom_object';
+  indexOfRefraction: number;
+  thickness: number;
+}
+
 export type OpticalComponent =
   | SourceComponent
   | FlatMirrorComponent
   | LensThinComponent
   | CavityFPComponent
   | TargetComponent
-  | BeamStopComponent;
+  | BeamStopComponent
+  | CustomObjectComponent;
 
 export interface TableConfig {
   width: number;
@@ -125,7 +156,12 @@ export interface PropagationWaist {
 }
 
 export interface PropagationResult {
-  profile: Array<{ z: number; w: number }>;
+  /**
+   * gouyPhaseDeg is the continuously-accumulated (unwrapped) Gouy phase in
+   * degrees, tracked along the whole propagation - see propagation.ts for
+   * the accumulation rule across lenses/cavities/custom objects.
+   */
+  profile: Array<{ z: number; w: number; gouyPhaseDeg: number }>;
   waists: PropagationWaist[];
   qAtComponent: Record<string, ComplexNumber>;
   qFinal: ComplexNumber;
@@ -154,12 +190,33 @@ export interface OptimiserSolution {
   summary: string;
 }
 
+/**
+ * A user-defined window, in beam-path z (mm), that the optimizer's movable
+ * lenses must stay within. z is measured along the unfolded beam path, so a
+ * single range can span across a mirror (i.e. bend a corner) when translated
+ * back into physical (x, y) space.
+ */
+export interface ManualAdjustmentRange {
+  id: string;
+  startZMm: number;
+  endZMm: number;
+}
+
 export interface OptimiserState {
   status: SolverStatus;
   solutions: OptimiserSolution[];
   previewedSolutionIndex: number | null;
   preRunSnapshot: Record<string, Point2d> | null;
   snapshotValid: boolean;
+  /**
+   * When true (the default), the optimizer discards any lens placement that
+   * would trigger a proximity warning against another component - i.e. it
+   * won't propose a solution the UI would flag as "too close."
+   */
+  avoidCollisions: boolean;
+  /** When true, movable lenses are confined to manualRanges (see below). */
+  manualRangesEnabled: boolean;
+  manualRanges: ManualAdjustmentRange[];
 }
 
 export interface AppState {

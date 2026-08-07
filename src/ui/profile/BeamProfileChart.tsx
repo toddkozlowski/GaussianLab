@@ -1,8 +1,9 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import {
   CartesianGrid,
   Line,
   LineChart,
+  ReferenceArea,
   ReferenceDot,
   ReferenceLine,
   ResponsiveContainer,
@@ -35,6 +36,7 @@ interface BeamProfileChartProps {
 interface ProfilePoint {
   z: number;
   w: number;
+  gouyPhaseDeg: number;
   [projectionKey: string]: number;
 }
 
@@ -53,14 +55,14 @@ function buildFallbackProfile(source: SourceComponent | null, beamPath: BeamPath
 
   const radius = source ? Math.max(0.05, source.waistRadius) : 0.25;
   const points: ProfilePoint[] = [];
-  points.push({ z: 0, w: radius });
+  points.push({ z: 0, w: radius, gouyPhaseDeg: 0 });
   for (const segment of beamPath.segments) {
-    points.push({ z: segment.zEnd, w: radius });
+    points.push({ z: segment.zEnd, w: radius, gouyPhaseDeg: 0 });
   }
   return points;
 }
 
-function nearestProfilePoint(profile: Array<{ z: number; w: number }>, zMm: number) {
+function nearestProfilePoint<T extends { z: number; w: number }>(profile: T[], zMm: number): T | null {
   if (profile.length === 0) {
     return null;
   }
@@ -92,6 +94,15 @@ function formatBeamRadius(radiusMm: number) {
   return `${radiusMm.toFixed(4)} mm`;
 }
 
+// Wraps an unwrapped phase in degrees into the principal value range (-180, 180].
+function wrapPhaseDeg(deg: number): number {
+  return ((((deg + 180) % 360) + 360) % 360) - 180;
+}
+
+function formatGouyPhaseDeg(deg: number): string {
+  return `${deg.toFixed(1)} deg`;
+}
+
 function formatAxisMax(value: number): string {
   if (!Number.isFinite(value)) {
     return '';
@@ -118,6 +129,7 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
 }) => {
   const frameRef = React.useRef<HTMLDivElement>(null);
   const [draggingLensId, setDraggingLensId] = useState<string | null>(null);
+  const [plotBounds, setPlotBounds] = useState<{ left: number; width: number } | null>(null);
 
   const baseProfile: ProfilePoint[] =
     propagationResult && propagationResult.profile.length > 0
@@ -129,15 +141,16 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
       return [] as Array<{ z: number; label: string }>;
     }
 
-    // Cavities and beam stops get their own dedicated markers (see
-    // cavityMarkers/beamStopMarkers below) instead of a single generic label.
+    // Cavities, beam stops, and custom objects get their own dedicated
+    // markers (see cavityMarkers/beamStopMarkers/customObjectMarkers below)
+    // instead of a single generic label.
     return beamPath.segments
       .filter((segment) => {
         if (!segment.terminatedByComponentId) {
           return false;
         }
         const kind = components[segment.terminatedByComponentId]?.kind;
-        return kind !== 'cavity_fp' && kind !== 'beam_stop';
+        return kind !== 'cavity_fp' && kind !== 'beam_stop' && kind !== 'custom_object';
       })
       .map((segment) => {
         const id = segment.terminatedByComponentId as string;
@@ -262,6 +275,33 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
       });
   }, [beamPath, components]);
 
+  const customObjectMarkers = useMemo(() => {
+    if (!beamPath) {
+      return [] as Array<{ id: string; label: string; z: number; thickness: number; isOpticallyActive: boolean }>;
+    }
+
+    return beamPath.segments
+      .filter((segment) => {
+        if (!segment.terminatedByComponentId) {
+          return false;
+        }
+        return components[segment.terminatedByComponentId]?.kind === 'custom_object';
+      })
+      .map((segment) => {
+        const id = segment.terminatedByComponentId as string;
+        const component = components[id];
+        const thickness = component?.kind === 'custom_object' ? component.thickness : 0;
+        const indexOfRefraction = component?.kind === 'custom_object' ? component.indexOfRefraction : 1;
+        return {
+          id,
+          z: segment.zEnd,
+          thickness,
+          label: component?.label ?? id,
+          isOpticallyActive: Math.abs(indexOfRefraction - 1) > 1e-9,
+        };
+      });
+  }, [beamPath, components]);
+
   // Cavities and targets can each opt in to showing their Gaussian mode
   // projected across the whole unfolded path (not just where the real beam
   // actually follows it), via their own showProjection toggle.
@@ -363,6 +403,8 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
   const [lockedYMaxMm, setLockedYMaxMm] = useState(1);
   const [lockXAxis, setLockXAxis] = useState(false);
   const [lockedXMaxMm, setLockedXMaxMm] = useState(1);
+  const [showGouyPhase, setShowGouyPhase] = useState(false);
+  const [gouyPhaseWrapped, setGouyPhaseWrapped] = useState(false);
 
   const profileMaxMm = profileData.reduce((maxValue, point) => {
     let pointMax = point.w;
@@ -382,8 +424,12 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
   const axisUnitLabel = useMicronAxis ? 'um' : 'mm';
   const roundedYAxisMax = Math.max(1, Math.ceil(effectiveYMaxMm * axisScale));
   const roundedXAxisMax = Math.max(1, Math.ceil(effectiveXMaxMm));
-  const chartData = profileData.map((point) => {
-    const scaled: Record<string, number> = { z: point.z, wAxis: point.w * axisScale };
+  const chartData: Array<Record<string, number | null>> = profileData.map((point) => {
+    const scaled: Record<string, number | null> = {
+      z: point.z,
+      wAxis: point.w * axisScale,
+      gouyPhaseAxis: gouyPhaseWrapped ? wrapPhaseDeg(point.gouyPhaseDeg) : point.gouyPhaseDeg,
+    };
     for (const projection of projections) {
       const value = point[`proj_${projection.id}`];
       if (typeof value === 'number') {
@@ -392,6 +438,22 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
     }
     return scaled;
   });
+  // Wrapping the phase into (-180, 180] introduces artificial jumps
+  // wherever the true phase crosses a multiple of 360 deg - break the line
+  // there (a null point) rather than drawing a misleading vertical segment
+  // connecting +180 to -180.
+  if (gouyPhaseWrapped) {
+    for (let i = 1; i < chartData.length; i += 1) {
+      const prev = chartData[i - 1].gouyPhaseAxis;
+      const current = chartData[i].gouyPhaseAxis;
+      if (typeof prev === 'number' && typeof current === 'number' && Math.abs(current - prev) > 180) {
+        chartData[i].gouyPhaseAxis = null;
+      }
+    }
+  }
+  const gouyPhaseDomain: [number, number] | undefined = gouyPhaseWrapped
+    ? [-180, 180]
+    : undefined;
 
   // Nothing affects the displayed range while an axis is locked - the
   // locked value only tracks the live auto-computed max while unlocked, so
@@ -408,8 +470,40 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
     }
   }, [lockXAxis, dataXMaxMm]);
 
+  // Lens markers are positioned in absolute HTML over the chart, but recharts
+  // insets the actual plot area from the frame's left edge by however wide the
+  // Y axis labels render (which varies with digit count). Measuring the grid's
+  // own background rect - rather than assuming the plot spans the full frame
+  // width - is what keeps a marker aligned under its lens's line on the chart.
+  useLayoutEffect(() => {
+    const frame = frameRef.current;
+    if (!frame) {
+      return;
+    }
+
+    const measure = () => {
+      const gridBg = frame.querySelector('.recharts-cartesian-grid-bg');
+      if (!gridBg) {
+        return;
+      }
+      const frameRect = frame.getBoundingClientRect();
+      const gridRect = gridBg.getBoundingClientRect();
+      setPlotBounds({ left: gridRect.left - frameRect.left, width: gridRect.width });
+    };
+
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(frame);
+    return () => observer.disconnect();
+  }, [roundedXAxisMax, roundedYAxisMax, axisUnitLabel]);
+
   const hoveredPoint = hoveredZMm !== null ? nearestProfilePoint(profileData, hoveredZMm) : null;
   const hoveredPointAxisY = hoveredPoint ? hoveredPoint.w * axisScale : null;
+  const hoveredGouyPhaseDeg = hoveredPoint
+    ? gouyPhaseWrapped
+      ? wrapPhaseDeg(hoveredPoint.gouyPhaseDeg)
+      : hoveredPoint.gouyPhaseDeg
+    : null;
 
   if (profileData.length === 0) {
     return <div className="profile-placeholder">No beam profile data available.</div>;
@@ -486,6 +580,24 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
             />
           </label>
         </div>
+        <label className="profile-gouy-toggle">
+          <input
+            type="checkbox"
+            checked={showGouyPhase}
+            onChange={(event) => setShowGouyPhase(event.target.checked)}
+          />
+          Gouy phase
+        </label>
+        {showGouyPhase && (
+          <label className="profile-gouy-toggle">
+            <input
+              type="checkbox"
+              checked={gouyPhaseWrapped}
+              onChange={(event) => setGouyPhaseWrapped(event.target.checked)}
+            />
+            Wrap phase
+          </label>
+        )}
       </div>
       <div className="profile-chart-frame" ref={frameRef}>
         <div style={{ width: '100%', height: 240 }}>
@@ -499,7 +611,29 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
               }}
               onMouseLeave={() => onHoverZMm(null)}
             >
-              <CartesianGrid strokeDasharray="3 3" stroke="#d5dde6" />
+              {/* fill="transparent" (rather than the default "none") forces recharts to
+                  render a .recharts-cartesian-grid-bg rect, which lens markers below use
+                  to measure the plot area's real pixel bounds. */}
+              <CartesianGrid strokeDasharray="3 3" stroke="#d5dde6" fill="transparent" />
+
+              {customObjectMarkers.map((marker) => (
+                <ReferenceArea
+                  key={`custom-object-${marker.id}`}
+                  x1={marker.z}
+                  x2={marker.z + marker.thickness}
+                  ifOverflow="visible"
+                  fill={marker.isOpticallyActive ? 'rgba(61, 126, 166, 0.16)' : 'rgba(138, 147, 156, 0.14)'}
+                  stroke={marker.isOpticallyActive ? 'rgba(61, 126, 166, 0.45)' : 'rgba(138, 147, 156, 0.4)'}
+                  strokeWidth={1}
+                  label={{
+                    value: marker.label,
+                    position: 'insideTop',
+                    fill: marker.isOpticallyActive ? '#3d7ea6' : '#6f7f91',
+                    fontSize: 11,
+                    fontWeight: 600,
+                  }}
+                />
+              ))}
               <XAxis
                 dataKey="z"
                 type="number"
@@ -524,6 +658,31 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
                 dot={false}
                 isAnimationActive={false}
               />
+
+              {showGouyPhase && (
+                <>
+                  <YAxis
+                    yAxisId="gouy"
+                    dataKey="gouyPhaseAxis"
+                    type="number"
+                    orientation="right"
+                    domain={gouyPhaseDomain ?? ['auto', 'auto']}
+                    allowDataOverflow={gouyPhaseWrapped}
+                    tick={{ fontSize: 11, fill: '#6f52d9' }}
+                    label={{ value: 'Gouy phase (deg)', angle: 90, position: 'insideRight', fill: '#6f52d9' }}
+                  />
+                  <Line
+                    yAxisId="gouy"
+                    dataKey="gouyPhaseAxis"
+                    type="monotone"
+                    stroke="#6f52d9"
+                    strokeWidth={2}
+                    dot={false}
+                    isAnimationActive={false}
+                    connectNulls={false}
+                  />
+                </>
+              )}
 
               {projections.map((projection) => (
                 <Line
@@ -592,6 +751,16 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
                 <>
                   <ReferenceLine x={hoveredPoint.z} stroke="#2d9bf0" />
                   <ReferenceDot x={hoveredPoint.z} y={hoveredPointAxisY ?? 0} r={4} fill="#2d9bf0" stroke="#ffffff" />
+                  {showGouyPhase && hoveredGouyPhaseDeg !== null && (
+                    <ReferenceDot
+                      yAxisId="gouy"
+                      x={hoveredPoint.z}
+                      y={hoveredGouyPhaseDeg}
+                      r={4}
+                      fill="#6f52d9"
+                      stroke="#ffffff"
+                    />
+                  )}
                 </>
               )}
 
@@ -621,60 +790,72 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
           </ResponsiveContainer>
         </div>
 
-        {lensMarkers.map((marker) => {
-          // Position against the axis's actual rendered domain, not the raw
-          // data max, so markers stay aligned with the curve when the X
-          // axis is locked to a different range.
-          const zMax = roundedXAxisMax;
-          const leftPercent = zMax > 0 ? (marker.z / zMax) * 100 : 0;
-          return (
-            <button
-              key={marker.id}
-              type="button"
-              className={`profile-lens-marker${draggingLensId === marker.id ? ' dragging' : ''}`}
-              style={{ left: `${Math.max(0, Math.min(100, leftPercent))}%` }}
-              title={`Drag ${marker.label} along path`}
-              onPointerDown={(event) => {
-                const frame = frameRef.current;
-                if (!frame) {
-                  return;
-                }
-
-                event.preventDefault();
-                setDraggingLensId(marker.id);
-                event.currentTarget.setPointerCapture(event.pointerId);
-
-                const updateFromClientX = (clientX: number) => {
-                  const rect = frame.getBoundingClientRect();
-                  if (rect.width <= 0) {
+        {plotBounds &&
+          lensMarkers.map((marker) => {
+            // Position against the plot area's real measured pixel bounds
+            // (see the useLayoutEffect above), not the frame's full width -
+            // recharts insets the plot by the Y axis label width, so a
+            // percent-of-frame position drifts left of the actual line.
+            const zMax = roundedXAxisMax;
+            const positionRatio = zMax > 0 ? Math.max(0, Math.min(1, marker.z / zMax)) : 0;
+            const leftPx = plotBounds.left + positionRatio * plotBounds.width;
+            return (
+              <button
+                key={marker.id}
+                type="button"
+                className={`profile-lens-marker${draggingLensId === marker.id ? ' dragging' : ''}`}
+                style={{ left: `${leftPx}px` }}
+                title={`Drag ${marker.label} along path`}
+                onPointerDown={(event) => {
+                  const frame = frameRef.current;
+                  if (!frame) {
                     return;
                   }
-                  const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-                  onMoveLensAlongPath(marker.id, ratio * roundedXAxisMax);
-                };
 
-                updateFromClientX(event.clientX);
+                  event.preventDefault();
+                  setDraggingLensId(marker.id);
+                  event.currentTarget.setPointerCapture(event.pointerId);
 
-                const onMove = (moveEvent: PointerEvent) => updateFromClientX(moveEvent.clientX);
-                const onUp = () => {
-                  window.removeEventListener('pointermove', onMove);
-                  window.removeEventListener('pointerup', onUp);
-                  setDraggingLensId((active) => (active === marker.id ? null : active));
-                };
+                  const updateFromClientX = (clientX: number) => {
+                    const frameRect = frame.getBoundingClientRect();
+                    const bounds = plotBounds ?? { left: 0, width: frameRect.width };
+                    if (bounds.width <= 0) {
+                      return;
+                    }
+                    const dragRatio = Math.max(
+                      0,
+                      Math.min(1, (clientX - frameRect.left - bounds.left) / bounds.width),
+                    );
+                    onMoveLensAlongPath(marker.id, dragRatio * roundedXAxisMax);
+                  };
 
-                window.addEventListener('pointermove', onMove);
-                window.addEventListener('pointerup', onUp);
-              }}
-            >
-              <span>{marker.label}</span>
-            </button>
-          );
-        })}
+                  updateFromClientX(event.clientX);
+
+                  const onMove = (moveEvent: PointerEvent) => updateFromClientX(moveEvent.clientX);
+                  const onUp = () => {
+                    window.removeEventListener('pointermove', onMove);
+                    window.removeEventListener('pointerup', onUp);
+                    setDraggingLensId((active) => (active === marker.id ? null : active));
+                  };
+
+                  window.addEventListener('pointermove', onMove);
+                  window.addEventListener('pointerup', onUp);
+                }}
+              >
+                <span className="profile-lens-marker-arrow" aria-hidden="true">&larr;</span>
+                <span>{marker.label}</span>
+                <span className="profile-lens-marker-arrow" aria-hidden="true">&rarr;</span>
+              </button>
+            );
+          })}
 
         {hoveredPoint && (
           <div className="profile-hover-card">
             <strong>{formatBeamRadius(hoveredPoint.w)}</strong>
             <span>z = {hoveredPoint.z.toFixed(1)} mm</span>
+            {showGouyPhase && hoveredGouyPhaseDeg !== null && (
+              <span>Gouy phase = {formatGouyPhaseDeg(hoveredGouyPhaseDeg)}</span>
+            )}
           </div>
         )}
 

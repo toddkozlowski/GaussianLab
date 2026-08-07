@@ -1,6 +1,7 @@
 import type {
   BeamStopComponent,
   CavityFPComponent,
+  CustomObjectComponent,
   FlatMirrorComponent,
   LensThinComponent,
   OpticalComponent,
@@ -9,6 +10,7 @@ import type {
   TargetComponent,
 } from './schema';
 import type { AppState, TableConfig } from './schema';
+import { DEFAULT_OPTIMISER_STATE } from './defaultState';
 
 function buildComponentId(prefix: string) {
   return `${prefix}-${crypto.randomUUID()}`;
@@ -68,6 +70,7 @@ export function createLensThinComponent(
     label: nextLabel('L', countComponentsByKind(components, 'lens_thin')),
     focalLength: 100,
     optimiserCanMove: true,
+    sensitivity: null,
   };
 }
 
@@ -118,6 +121,21 @@ export function createBeamStopComponent(
   };
 }
 
+export function createCustomObjectComponent(
+  components: Record<string, OpticalComponent> = {},
+  position: Point2d = { x: 0, y: 0 },
+): CustomObjectComponent {
+  return {
+    id: buildComponentId('custom-object'),
+    kind: 'custom_object',
+    position,
+    locked: false,
+    label: nextLabel('CO', countComponentsByKind(components, 'custom_object')),
+    indexOfRefraction: 1,
+    thickness: 25,
+  };
+}
+
 /**
  * Create initial app state with default table config and a source component
  */
@@ -141,13 +159,7 @@ export function createInitialAppState(): AppState {
     beamPath: null,
     propagationResult: null,
     targetMode: null,
-    optimiser: {
-      status: 'idle',
-      solutions: [],
-      previewedSolutionIndex: null,
-      preRunSnapshot: null,
-      snapshotValid: false,
-    },
+    optimiser: DEFAULT_OPTIMISER_STATE,
     selectedComponentId: null,
   };
 }

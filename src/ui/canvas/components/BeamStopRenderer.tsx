@@ -13,19 +13,23 @@ import type { BeamStopComponent, Point2d } from '../../../app/state/schema';
 interface BeamStopRendererProps {
   component: BeamStopComponent;
   mmToPx: (mm: number) => number;
+  onDragMove: (componentId: string, newPos: Point2d) => void;
   onDragEnd: (componentId: string, newPos: Point2d) => void;
   onSelect: (componentId: string) => void;
   isDraggable: boolean;
   isSelected: boolean;
+  getSnappedDragPositionPx: (component: BeamStopComponent, rawPx: Point2d) => Point2d;
 }
 
 export const BeamStopRenderer: React.FC<BeamStopRendererProps> = ({
   component,
   mmToPx,
+  onDragMove,
   onDragEnd,
   onSelect,
   isDraggable,
   isSelected,
+  getSnappedDragPositionPx,
 }) => {
   const groupRef = useRef<Konva.Group>(null);
 
@@ -33,6 +37,14 @@ export const BeamStopRenderer: React.FC<BeamStopRendererProps> = ({
   const y = mmToPx(component.position.y);
   const size = Math.max(16, mmToPx(18));
   const half = size / 2;
+
+  const handleDragMove = (e: Konva.KonvaEventObject<DragEvent>) => {
+    if (groupRef.current) {
+      const newX = groupRef.current.x() / mmToPx(1);
+      const newY = groupRef.current.y() / mmToPx(1);
+      onDragMove(component.id, { x: newX, y: newY });
+    }
+  };
 
   const handleDragEnd = (e: Konva.KonvaEventObject<DragEvent>) => {
     if (groupRef.current) {
@@ -48,6 +60,8 @@ export const BeamStopRenderer: React.FC<BeamStopRendererProps> = ({
       x={x}
       y={y}
       draggable={isDraggable}
+      dragBoundFunc={(pos) => getSnappedDragPositionPx(component, pos)}
+      onDragMove={handleDragMove}
       onDragEnd={handleDragEnd}
       onClick={() => onSelect(component.id)}
       onTap={() => onSelect(component.id)}

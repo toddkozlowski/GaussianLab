@@ -1,6 +1,7 @@
 import { AppShell } from './app/layout/AppShell';
 import { initializeStore } from './app/state/Store';
 import { createInitialAppState } from './app/state/componentFactories';
+import { loadStateFromStorage } from './app/state/persistence';
 import type { CavityFPComponent } from './app/state/schema';
 import type { CavitySolver } from './app/state/types/Layer0Interfaces';
 import { solveTwoMirrorEigenmode } from './math/cavity';
@@ -36,7 +37,7 @@ const cavitySolver: CavitySolver = {
 
 const ensureStoreInitialized = () => {
   if (!storeInitialized) {
-    const initialState = createInitialAppState();
+    const initialState = loadStateFromStorage() ?? createInitialAppState();
     initializeStore(initialState, propagationEngine, cavitySolver);
     storeInitialized = true;
   }

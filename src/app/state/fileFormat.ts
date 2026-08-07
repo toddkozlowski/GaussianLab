@@ -42,6 +42,7 @@ const KIND_ORDER: Record<ComponentKind, number> = {
   cavity_fp: 3,
   target: 4,
   beam_stop: 5,
+  custom_object: 6,
 };
 
 // ---------------------------------------------------------------------------
@@ -132,6 +133,15 @@ function serializeComponent(component: OpticalComponent): Section {
       };
     case 'beam_stop':
       return { header, lines: base };
+    case 'custom_object':
+      return {
+        header,
+        lines: [
+          ...base,
+          ['index_of_refraction', String(component.indexOfRefraction)],
+          ['thickness_mm', String(component.thickness)],
+        ],
+      };
   }
 }
 
@@ -301,6 +311,7 @@ function parseComponentSection(section: ParsedSection): OpticalComponent | null 
         kind: 'lens_thin',
         focalLength: requireNumber(section, 'focal_length_mm'),
         optimiserCanMove: parseBool(section.values.get('optimiser_can_move'), true),
+        sensitivity: null,
       };
     case 'cavity_fp':
       return {
@@ -322,6 +333,13 @@ function parseComponentSection(section: ParsedSection): OpticalComponent | null 
       };
     case 'beam_stop':
       return { ...base, kind: 'beam_stop' };
+    case 'custom_object':
+      return {
+        ...base,
+        kind: 'custom_object',
+        indexOfRefraction: requireNumber(section, 'index_of_refraction'),
+        thickness: requireNumber(section, 'thickness_mm'),
+      };
     default:
       return null; // e.g. [table]/[setup], or an unrecognised section kind
   }

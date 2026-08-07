@@ -14,6 +14,9 @@ export const DEFAULT_OPTIMISER_STATE: OptimiserState = {
   previewedSolutionIndex: null,
   preRunSnapshot: null,
   snapshotValid: false,
+  avoidCollisions: true,
+  manualRangesEnabled: false,
+  manualRanges: [],
 };
 
 export const DEFAULT_APP_STATE: AppState = {

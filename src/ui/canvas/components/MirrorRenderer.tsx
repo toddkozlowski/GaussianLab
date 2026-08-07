@@ -16,10 +16,12 @@ import type { FlatMirrorComponent, MirrorOrientation, Point2d } from '../../../a
 interface MirrorRendererProps {
   component: FlatMirrorComponent;
   mmToPx: (mm: number) => number;
+  onDragMove: (componentId: string, newPos: Point2d) => void;
   onDragEnd: (componentId: string, newPos: Point2d) => void;
   onSelect: (componentId: string) => void;
   isDraggable: boolean;
   isSelected: boolean;
+  getSnappedDragPositionPx: (component: FlatMirrorComponent, rawPx: Point2d) => Point2d;
 }
 
 // Direction the substrate extends behind the reflective face, per
@@ -36,10 +38,12 @@ const SUBSTRATE_DIRECTION: Record<MirrorOrientation, { x: number; y: number }> =
 export const MirrorRenderer: React.FC<MirrorRendererProps> = ({
   component,
   mmToPx,
+  onDragMove,
   onDragEnd,
   onSelect,
   isDraggable,
   isSelected,
+  getSnappedDragPositionPx,
 }) => {
   const lineRef = useRef<Konva.Line>(null);
   const groupRef = useRef<Konva.Group>(null);
@@ -65,6 +69,14 @@ export const MirrorRenderer: React.FC<MirrorRendererProps> = ({
   const backRight: Point2d = { x: dx + nx * substrateThickness, y: dy + ny * substrateThickness };
   const backLeft: Point2d = { x: -dx + nx * substrateThickness, y: -dy + ny * substrateThickness };
 
+  const handleDragMove = (e: Konva.KonvaEventObject<DragEvent>) => {
+    if (groupRef.current) {
+      const newX = groupRef.current.x() / mmToPx(1);
+      const newY = groupRef.current.y() / mmToPx(1);
+      onDragMove(component.id, { x: newX, y: newY });
+    }
+  };
+
   const handleDragEnd = (e: Konva.KonvaEventObject<DragEvent>) => {
     if (groupRef.current) {
       const newX = groupRef.current.x() / mmToPx(1);
@@ -79,6 +91,8 @@ export const MirrorRenderer: React.FC<MirrorRendererProps> = ({
       x={x}
       y={y}
       draggable={isDraggable}
+      dragBoundFunc={(pos) => getSnappedDragPositionPx(component, pos)}
+      onDragMove={handleDragMove}
       onDragEnd={handleDragEnd}
       onClick={() => onSelect(component.id)}
       onTap={() => onSelect(component.id)}

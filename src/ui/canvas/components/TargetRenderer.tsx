@@ -13,19 +13,23 @@ import type { Point2d, TargetComponent } from '../../../app/state/schema';
 interface TargetRendererProps {
   component: TargetComponent;
   mmToPx: (mm: number) => number;
+  onDragMove: (componentId: string, newPos: Point2d) => void;
   onDragEnd: (componentId: string, newPos: Point2d) => void;
   onSelect: (componentId: string) => void;
   isDraggable: boolean;
   isSelected: boolean;
+  getSnappedDragPositionPx: (component: TargetComponent, rawPx: Point2d) => Point2d;
 }
 
 export const TargetRenderer: React.FC<TargetRendererProps> = ({
   component,
   mmToPx,
+  onDragMove,
   onDragEnd,
   onSelect,
   isDraggable,
   isSelected,
+  getSnappedDragPositionPx,
 }) => {
   const groupRef = useRef<Konva.Group>(null);
 
@@ -34,6 +38,14 @@ export const TargetRenderer: React.FC<TargetRendererProps> = ({
   const outerRadius = Math.max(8, mmToPx(10));
   const innerRadius = Math.max(2, outerRadius * 0.35);
   const color = '#17A2B8';
+
+  const handleDragMove = (e: Konva.KonvaEventObject<DragEvent>) => {
+    if (groupRef.current) {
+      const newX = groupRef.current.x() / mmToPx(1);
+      const newY = groupRef.current.y() / mmToPx(1);
+      onDragMove(component.id, { x: newX, y: newY });
+    }
+  };
 
   const handleDragEnd = (e: Konva.KonvaEventObject<DragEvent>) => {
     if (groupRef.current) {
@@ -52,6 +64,8 @@ export const TargetRenderer: React.FC<TargetRendererProps> = ({
       x={x}
       y={y}
       draggable={isDraggable}
+      dragBoundFunc={(pos) => getSnappedDragPositionPx(component, pos)}
+      onDragMove={handleDragMove}
       onDragEnd={handleDragEnd}
       onClick={() => onSelect(component.id)}
       onTap={() => onSelect(component.id)}

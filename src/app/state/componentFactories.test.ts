@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   createBeamStopComponent,
   createCavityFPComponent,
+  createCustomObjectComponent,
   createFlatMirrorComponent,
   createLensThinComponent,
   createSourceComponent,
@@ -64,5 +65,18 @@ describe('componentFactories', () => {
     expect(firstStop.label).toBe('BS1');
     expect(firstStop.locked).toBe(false);
     expect(secondStop.label).toBe('BS2');
+  });
+
+  it('creates custom object with expected defaults and incremental label', () => {
+    const components: Record<string, OpticalComponent> = {};
+    const firstObject = createCustomObjectComponent(components, { x: 900, y: 300 });
+    components[firstObject.id] = firstObject;
+    const secondObject = createCustomObjectComponent(components, { x: 950, y: 300 });
+
+    expect(firstObject.kind).toBe('custom_object');
+    expect(firstObject.label).toBe('CO1');
+    expect(firstObject.indexOfRefraction).toBe(1);
+    expect(firstObject.thickness).toBe(25);
+    expect(secondObject.label).toBe('CO2');
   });
 });

@@ -54,7 +54,7 @@ describe('computeLiveModeOverlap', () => {
         // qFinal exactly matches the cavity's own eigenmode - simulating the
         // forced downstream substitution. If the buggy output-vs-target
         // comparison were still in play, this alone would read ~100%.
-        profile: [{ z: 200, w: 0.05 }],
+        profile: [{ z: 200, w: 0.05, gouyPhaseDeg: 0 }],
         waists: [],
         qAtComponent: {},
         qFinal: { re: -50, im: (Math.PI * 0.05 * 0.05) / (1064e-6) },
@@ -81,7 +81,7 @@ describe('computeLiveModeOverlap', () => {
       components: { [source.id]: source, [cavity.id]: cavity },
       targetMode: { kind: 'cavity', cavityComponentId: cavity.id },
       propagationResult: {
-        profile: [{ z: 50, w: 0.05 }],
+        profile: [{ z: 50, w: 0.05, gouyPhaseDeg: 0 }],
         waists: [],
         qAtComponent: {},
         qFinal: { re: 0, im: 1e-3 },
@@ -140,7 +140,7 @@ describe('computeLiveModeOverlap', () => {
       },
       targetMode: { kind: 'target', targetComponentId: target.id },
       propagationResult: {
-        profile: [{ z: 200, w: 0.05 }],
+        profile: [{ z: 200, w: 0.05, gouyPhaseDeg: 0 }],
         waists: [],
         qAtComponent: {
           // Beam sits exactly at its own waist right at the target -> perfect match.
@@ -168,7 +168,7 @@ describe('computeLiveModeOverlap', () => {
       components: { [source.id]: source, [target.id]: target },
       targetMode: { kind: 'target', targetComponentId: target.id },
       propagationResult: {
-        profile: [{ z: 50, w: 0.05 }],
+        profile: [{ z: 50, w: 0.05, gouyPhaseDeg: 0 }],
         waists: [],
         qAtComponent: {}, // beam never reached the target
         qFinal: { re: 0, im: 1e-3 },

@@ -1,4 +1,7 @@
-import type { AppState, BeamPath, OpticalComponent, Point2d } from './schema';
+import type { AppState, BeamPath, BeamSegment, OpticalComponent, Point2d } from './schema';
+
+/** Components closer than this (mm) trigger the "too close" proximity warning. */
+export const DANGEROUS_PROXIMITY_THRESHOLD_MM = 10;
 
 interface DangerousPair {
   aId: string;
@@ -29,6 +32,20 @@ export function getComponentPathPosition(
   return segment ? round3(segment.zEnd) : null;
 }
 
+/**
+ * Which table axis a component's position.x/position.y edits actually move
+ * it along, i.e. the direction of the beam segment it sits on: 'x' for a
+ * horizontal (left/right) segment, 'y' for a vertical (up/down) one. Falls
+ * back to the path's first segment (or 'x') when the component isn't on a
+ * resolved path yet.
+ */
+export function getComponentMovementAxis(state: AppState, componentId: string): 'x' | 'y' {
+  const segment =
+    state.beamPath?.segments.find((s) => s.terminatedByComponentId === componentId) ??
+    state.beamPath?.segments[0];
+  return segment?.direction === 'up' || segment?.direction === 'down' ? 'y' : 'x';
+}
+
 export function pointOnBeamPathAtZ(beamPath: BeamPath | null, zMm: number): Point2d | null {
   if (!beamPath || !beamPath.isValid || beamPath.segments.length === 0) {
     return null;
@@ -53,9 +70,95 @@ export function pointOnBeamPathAtZ(beamPath: BeamPath | null, zMm: number): Poin
   return { x: round3(last.end.x), y: round3(last.end.y) };
 }
 
+/** One segment's worth of a z-range: the sub-span of that segment the range covers, physically resolved. */
+export interface ZRangeSegmentExtent {
+  segment: BeamSegment;
+  zSubStart: number;
+  zSubEnd: number;
+  pointA: Point2d;
+  pointB: Point2d;
+}
+
+/**
+ * Resolves a [startZMm, endZMm] window (order-independent) into the physical
+ * segment(s) it covers. A window that crosses a mirror spans more than one
+ * segment - e.g. a range that starts before a mirror and ends after it
+ * yields one extent per segment, which together bend around the corner the
+ * same way the beam itself does.
+ */
+export function resolveZRangeExtents(
+  beamPath: BeamPath | null,
+  startZMm: number,
+  endZMm: number,
+): ZRangeSegmentExtent[] {
+  if (!beamPath || !beamPath.isValid || beamPath.segments.length === 0) {
+    return [];
+  }
+
+  const lo = Math.min(startZMm, endZMm);
+  const hi = Math.max(startZMm, endZMm);
+  const extents: ZRangeSegmentExtent[] = [];
+
+  for (const segment of beamPath.segments) {
+    const subLo = Math.max(lo, segment.zStart);
+    const subHi = Math.min(hi, segment.zEnd);
+    if (subHi <= subLo) {
+      continue;
+    }
+
+    const pointA = pointOnBeamPathAtZ(beamPath, subLo);
+    const pointB = pointOnBeamPathAtZ(beamPath, subHi);
+    if (!pointA || !pointB) {
+      continue;
+    }
+
+    extents.push({ segment, zSubStart: subLo, zSubEnd: subHi, pointA, pointB });
+  }
+
+  return extents;
+}
+
+/**
+ * Distance between a pair of components, for proximity warnings. A custom
+ * object occupies real physical thickness along the beam (not just its
+ * anchor point, which is its front face) - so whenever both components' beam
+ * path z-positions are resolvable, distance to a custom object is measured
+ * to its nearest face (zero if the other component's z falls inside the
+ * object's span). Otherwise - e.g. either component currently isn't on a
+ * resolved beam path - this falls back to plain 2D distance between anchors,
+ * same as any other pair.
+ */
+function pairDistanceMm(
+  a: OpticalComponent,
+  b: OpticalComponent,
+  sourceId: string | null,
+  beamPath: BeamPath | null,
+): number {
+  const object = a.kind === 'custom_object' ? a : b.kind === 'custom_object' ? b : null;
+  const other = object === a ? b : a;
+
+  if (object && other.kind !== 'custom_object') {
+    const frontZ = getComponentPathPosition(sourceId, beamPath, object.id);
+    const otherZ = getComponentPathPosition(sourceId, beamPath, other.id);
+    if (frontZ !== null && otherZ !== null) {
+      const backZ = frontZ + object.thickness;
+      if (otherZ >= frontZ && otherZ <= backZ) {
+        return 0; // other component sits inside the object's span
+      }
+      return otherZ < frontZ ? frontZ - otherZ : otherZ - backZ;
+    }
+  }
+
+  const dx = a.position.x - b.position.x;
+  const dy = a.position.y - b.position.y;
+  return Math.sqrt(dx * dx + dy * dy);
+}
+
 export function computeDangerousPairs(
   components: Record<string, OpticalComponent>,
-  thresholdMm: number = 10,
+  sourceId: string | null,
+  beamPath: BeamPath | null,
+  thresholdMm: number = DANGEROUS_PROXIMITY_THRESHOLD_MM,
 ): DangerousPair[] {
   const list = Object.values(components);
   const pairs: DangerousPair[] = [];
@@ -64,9 +167,7 @@ export function computeDangerousPairs(
     for (let j = i + 1; j < list.length; j += 1) {
       const a = list[i];
       const b = list[j];
-      const dx = a.position.x - b.position.x;
-      const dy = a.position.y - b.position.y;
-      const distanceMm = Math.sqrt(dx * dx + dy * dy);
+      const distanceMm = pairDistanceMm(a, b, sourceId, beamPath);
       if (distanceMm < thresholdMm) {
         pairs.push({
           aId: a.id,
@@ -85,6 +186,22 @@ export function computeDangerousPairs(
 export function moveLensToPathZ(state: AppState, lensId: string, zMm: number): Point2d | null {
   const lens = state.components[lensId];
   if (!lens || lens.kind !== 'lens_thin') {
+    return null;
+  }
+
+  return pointOnBeamPathAtZ(state.beamPath, zMm);
+}
+
+/**
+ * Resolves the (x, y) a component would sit at if slid to a given z along
+ * the beam path. Mirrors are excluded: repositioning one also changes the
+ * geometry of every downstream segment, so "slide along z" isn't a
+ * well-defined single-axis edit the way it is for a component that just
+ * terminates a segment without redirecting the beam.
+ */
+export function moveComponentToPathZ(state: AppState, componentId: string, zMm: number): Point2d | null {
+  const component = state.components[componentId];
+  if (!component || component.kind === 'mirror_flat') {
     return null;
   }
 

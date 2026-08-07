@@ -22,5 +22,6 @@ export function useAppStore() {
     runSolver: (maxSolutions?: number) => store.runSolver(maxSolutions),
     previewSolution: (index: number) => store.previewSolution(index),
     applySolution: (index: number) => store.applySolution(index),
+    resetTable: () => store.resetTable(),
   };
 }

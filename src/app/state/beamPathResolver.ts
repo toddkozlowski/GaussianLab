@@ -168,7 +168,12 @@ function traceBeamPath(
       const newDir = reflectDirection(currentDir, mirror.orientation);
       currentDir = newDir;
       currentPos = hitPoint;
-    } else if (component.kind === 'lens_thin' || component.kind === 'cavity_fp' || component.kind === 'target') {
+    } else if (
+      component.kind === 'lens_thin' ||
+      component.kind === 'cavity_fp' ||
+      component.kind === 'target' ||
+      component.kind === 'custom_object'
+    ) {
       // Pass through: direction unchanged
       currentPos = hitPoint;
       // direction stays the same

@@ -14,10 +14,13 @@ import type {
   BeamPath,
   PropagationResult,
   CavityFPComponent,
+  LensThinComponent,
   CavityEigenmode,
 } from './schema';
 import { resolveBeamPath } from './beamPathResolver';
 import type { PropagationEngine, CavitySolver } from './types/Layer0Interfaces';
+import { getComponentMovementAxis } from './pathUtils';
+import { computeLiveModeOverlap } from './modeMetrics';
 
 /**
  * Resolve all derived state in an AppState.
@@ -26,9 +29,27 @@ import type { PropagationEngine, CavitySolver } from './types/Layer0Interfaces';
  * @param state The state from the reducer
  * @param propagationEngine Optional Layer 0 propagation function; if undefined, PropagationResult = null
  * @param cavitySolver Optional Layer 0 cavity solver; if undefined, cavities have null eigenmode
- * @returns Updated state with beamPath and propagationResult filled
+ * @returns Updated state with beamPath, propagationResult and per-lens sensitivity filled
  */
 export function resolveAppState(
+  state: AppState,
+  propagationEngine?: PropagationEngine,
+  cavitySolver?: CavitySolver
+): AppState {
+  const resolved = resolveCoreState(state, propagationEngine, cavitySolver);
+  return {
+    ...resolved,
+    components: attachLensSensitivities(resolved, propagationEngine),
+  };
+}
+
+/**
+ * Beam path + propagation + cavity eigenmodes only - the part of resolution
+ * that's safe to call again on a perturbed trial state (e.g. from
+ * attachLensSensitivities below) without recursing into sensitivity
+ * computation itself.
+ */
+function resolveCoreState(
   state: AppState,
   propagationEngine?: PropagationEngine,
   cavitySolver?: CavitySolver
@@ -83,6 +104,78 @@ export function resolveAppState(
     beamPath,
     propagationResult,
   };
+}
+
+// Half-step (mm) used for the central-difference curvature estimate below.
+// Small enough to stay local to the current position, large enough to stay
+// well clear of floating-point noise in the overlap calculation.
+const SENSITIVITY_STEP_MM = 0.5;
+
+/**
+ * Recompute each lens's position-sensitivity (see LensThinComponent.sensitivity)
+ * against the just-resolved state. No-op (nulls everything out) when there's
+ * no propagation engine or no target mode to measure overlap against.
+ */
+function attachLensSensitivities(
+  state: AppState,
+  propagationEngine?: PropagationEngine,
+): AppState['components'] {
+  const components = { ...state.components };
+
+  for (const [id, component] of Object.entries(state.components)) {
+    if (component.kind !== 'lens_thin') {
+      continue;
+    }
+    const sensitivity =
+      propagationEngine && state.targetMode ? computeLensSensitivity(state, id, propagationEngine) : null;
+    components[id] = { ...(component as LensThinComponent), sensitivity };
+  }
+
+  return components;
+}
+
+/**
+ * Curvature (second derivative) of overlap % with respect to this lens's
+ * position along its beam axis, evaluated at its current position via a
+ * central finite difference: two extra (cheap) propagations, reusing the
+ * already-solved cavity eigenmodes rather than re-solving them, since
+ * nudging a lens doesn't change any cavity's geometry.
+ */
+function computeLensSensitivity(
+  state: AppState,
+  lensId: string,
+  propagationEngine: PropagationEngine,
+): number | null {
+  const lens = state.components[lensId];
+  if (!lens || lens.kind !== 'lens_thin') {
+    return null;
+  }
+
+  const axis = getComponentMovementAxis(state, lensId);
+  const h = SENSITIVITY_STEP_MM;
+
+  const overlapAtOffset = (offsetMm: number): number | null => {
+    const perturbedComponents = {
+      ...state.components,
+      [lensId]: {
+        ...lens,
+        position: { ...lens.position, [axis]: lens.position[axis] + offsetMm },
+      },
+    };
+    const perturbedState = resolveCoreState({ ...state, components: perturbedComponents }, propagationEngine);
+    return computeLiveModeOverlap(perturbedState);
+  };
+
+  const oMinus = overlapAtOffset(-h);
+  const oCenter = computeLiveModeOverlap(state);
+  const oPlus = overlapAtOffset(h);
+
+  if (oMinus === null || oCenter === null || oPlus === null) {
+    return null;
+  }
+
+  const secondDerivative = (oPlus - 2 * oCenter + oMinus) / (h * h); // overlap fraction per mm^2
+  return Math.abs(secondDerivative) * 100; // -> %/mm^2
 }
 
 /**
@@ -153,6 +246,8 @@ function beamPathToSegments(state: AppState, beamPath: BeamPath): any[] {
       cavityEigenmode: terminated?.kind === 'cavity_fp' ? terminated.eigenmode : undefined,
       cavityLengthMm: terminated?.kind === 'cavity_fp' ? terminated.length : undefined,
       cavityCouplingThreshold: terminated?.kind === 'cavity_fp' ? 0.25 : undefined,
+      customObjectIndexOfRefraction: terminated?.kind === 'custom_object' ? terminated.indexOfRefraction : undefined,
+      customObjectThicknessMm: terminated?.kind === 'custom_object' ? terminated.thickness : undefined,
     };
   });
 }

@@ -7,6 +7,7 @@ import {
   createCavityFPComponent,
   createTargetComponent,
   createBeamStopComponent,
+  createCustomObjectComponent,
 } from './componentFactories';
 import { DEFAULT_APP_STATE } from './defaultState';
 import type { AppState, CavityFPComponent } from './schema';
@@ -38,6 +39,10 @@ function buildRichState(): AppState {
   const beamStop = createBeamStopComponent({}, { x: 900, y: 300 });
   beamStop.locked = true;
 
+  const customObject = createCustomObjectComponent({}, { x: 1000, y: 300 });
+  customObject.indexOfRefraction = 1.5;
+  customObject.thickness = 40;
+
   return {
     ...DEFAULT_APP_STATE,
     table: {
@@ -55,6 +60,7 @@ function buildRichState(): AppState {
       [cavity.id]: cavity,
       [target.id]: target,
       [beamStop.id]: beamStop,
+      [customObject.id]: customObject,
     },
     targetMode: { kind: 'cavity', cavityComponentId: cavity.id },
   };
@@ -78,9 +84,12 @@ describe('.gaussian file format', () => {
     expect(text).toContain('[cavity_fp FP1]');
     expect(text).toContain('[target T1]');
     expect(text).toContain('[beam_stop BS1]');
+    expect(text).toContain('[custom_object CO1]');
     expect(text).toContain('width_mm');
     expect(text).toContain('wavelength_nm');
     expect(text).toContain('focal_length_mm');
+    expect(text).toContain('index_of_refraction');
+    expect(text).toContain('thickness_mm');
     expect(text).not.toContain('{'); // not JSON
   });
 

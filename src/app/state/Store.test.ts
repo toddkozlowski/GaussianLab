@@ -195,4 +195,19 @@ describe('AppStore', () => {
     // No dispatch
     expect(listener).not.toHaveBeenCalled();
   });
+
+  it('resetTable wipes components back to the initial default and clears autosave', () => {
+    window.localStorage.clear();
+    const store = new AppStore(DEFAULT_APP_STATE);
+    const lens = createLensThinComponent();
+    store.dispatch({ type: 'ADD_COMPONENT', payload: lens });
+    expect(store.getState().components[lens.id]).toBeDefined();
+
+    store.resetTable();
+
+    const state = store.getState();
+    expect(state.components[lens.id]).toBeUndefined();
+    expect(Object.values(state.components).some((c) => c.kind === 'source')).toBe(true);
+    expect(window.localStorage.getItem('gaussianlab.autosave.v1')).toBeNull();
+  });
 });

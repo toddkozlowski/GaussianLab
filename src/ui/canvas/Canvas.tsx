@@ -25,8 +25,11 @@ import { LensRenderer } from './components/LensRenderer';
 import { CavityRenderer } from './components/CavityRenderer';
 import { TargetRenderer } from './components/TargetRenderer';
 import { BeamStopRenderer } from './components/BeamStopRenderer';
+import { CustomObjectRenderer } from './components/CustomObjectRenderer';
+import { CavityStabilityDiagram } from './components/CavityStabilityDiagram';
 import { GridOverlay } from './GridOverlay';
 import { BeamCorridorOverlay } from './BeamCorridorOverlay';
+import { TuningRangeOverlay } from './TuningRangeOverlay';
 import { snapPointToGrid, gridSpacingMm } from '../../app/state/snapToGrid';
 import { handleCaretStepKeyDown } from '../shared/numericCaretStep';
 import lockIcon from '../../../icons/lock.svg';
@@ -57,15 +60,24 @@ export const Canvas: React.FC<CanvasProps> = ({
   onHoverZMm,
 }) => {
   const selectionCardWidth = 224;
+  const selectionCardWidthWithStability = 452;
   const stageRef = useRef<Konva.Stage>(null);
   const viewportRef = useRef<HTMLDivElement>(null);
   const { state, dispatch } = useAppStore();
   const [viewportSize, setViewportSize] = React.useState({ width: 960, height: 420 });
+  const [showStability, setShowStability] = React.useState(false);
   const source = sourceId ? components[sourceId] : null;
   const sourceComponent = source && source.kind === 'source' ? (source as SourceComponent) : null;
   const selected = state.selectedComponentId ? state.components[state.selectedComponentId] : null;
   const isSelectedOnPath =
     !!selected && (beamPath?.segments.some((segment) => segment.terminatedByComponentId === selected.id) ?? false);
+
+  // Collapse the stability panel whenever the selection changes, rather than
+  // leaving it expanded (and pinned to a stale cardHeight) for whatever gets
+  // selected next.
+  React.useEffect(() => {
+    setShowStability(false);
+  }, [state.selectedComponentId]);
   const hoveredProfilePoint = React.useMemo(
     () => (hoveredZMm === null ? null : nearestProfilePoint(propagationResult?.profile ?? [], hoveredZMm)),
     [hoveredZMm, propagationResult]
@@ -180,7 +192,8 @@ export const Canvas: React.FC<CanvasProps> = ({
         component.kind === 'lens_thin' ||
         component.kind === 'cavity_fp' ||
         component.kind === 'target' ||
-        component.kind === 'beam_stop'
+        component.kind === 'beam_stop' ||
+        component.kind === 'custom_object'
       ) {
         // Only snap onto the beam axis while the drag stays within the same
         // capture distance the physics engine uses to decide whether this
@@ -202,12 +215,7 @@ export const Canvas: React.FC<CanvasProps> = ({
     [clampToTableCenter, config.axisCaptureThreshold, config.gridStandard, config.snapToGrid, nearestBeamAxisSnap]
   );
 
-  const handleComponentDragEnd = (componentId: string, newPos: Point2d) => {
-    const component = components[componentId];
-    if (!component) {
-      return;
-    }
-
+  const dispatchNormalizedPosition = (componentId: string, component: OpticalComponent, newPos: Point2d) => {
     const normalized = normalizePosition(component, newPos);
     if (component.kind === 'cavity_fp' && normalized.direction) {
       dispatch({
@@ -229,20 +237,20 @@ export const Canvas: React.FC<CanvasProps> = ({
     });
   };
 
+  const handleComponentDragEnd = (componentId: string, newPos: Point2d) => {
+    const component = components[componentId];
+    if (!component) {
+      return;
+    }
+    dispatchNormalizedPosition(componentId, component, newPos);
+  };
+
   const handleComponentDragMove = (componentId: string, newPos: Point2d) => {
     const component = components[componentId];
     if (!component) {
       return;
     }
-
-    const normalized = normalizePosition(component, newPos);
-    dispatch({
-      type: 'UPDATE_COMPONENT',
-      payload: {
-        id: componentId,
-        updates: { position: normalized.position },
-      },
-    });
+    dispatchNormalizedPosition(componentId, component, newPos);
   };
 
   const getSnappedDragPositionPx = React.useCallback(
@@ -348,6 +356,8 @@ export const Canvas: React.FC<CanvasProps> = ({
     );
   }
 
+  const stabilityPanelOpen = selected?.kind === 'cavity_fp' && showStability;
+
   const selectedOverlayPos = selected
     ? getSelectionPopoverPosition({
         componentPx: {
@@ -355,8 +365,8 @@ export const Canvas: React.FC<CanvasProps> = ({
           y: tablePadding + mmToPx(selected.position.y),
         },
         viewportSize,
-        cardWidth: selectionCardWidth,
-        cardHeight: getSelectionCardHeight(selected.kind),
+        cardWidth: stabilityPanelOpen ? selectionCardWidthWithStability : selectionCardWidth,
+        cardHeight: getSelectionCardHeight(selected.kind) + (stabilityPanelOpen ? 120 : 0),
         marginPx: 12,
       })
     : null;
@@ -412,6 +422,13 @@ export const Canvas: React.FC<CanvasProps> = ({
           <Group x={tablePadding} y={tablePadding}>
             <GridOverlay config={config} mmToPx={mmToPx} />
 
+            <TuningRangeOverlay
+              beamPath={beamPath}
+              manualRanges={state.optimiser.manualRangesEnabled ? state.optimiser.manualRanges : []}
+              gridStandard={config.gridStandard}
+              mmToPx={mmToPx}
+            />
+
             <BeamCorridorOverlay
               beamPath={beamPath}
               source={sourceComponent}
@@ -426,20 +443,25 @@ export const Canvas: React.FC<CanvasProps> = ({
                   <SourceRenderer
                     component={component}
                     mmToPx={mmToPx}
+                    spacingMm={gridSpacingMm(config.gridStandard)}
+                    onDragMove={handleComponentDragMove}
                     onDragEnd={handleComponentDragEnd}
                     onSelect={selectComponent}
                     isDraggable={!component.locked}
                     isSelected={state.selectedComponentId === component.id}
+                    getSnappedDragPositionPx={getSnappedDragPositionPx}
                   />
                 )}
                 {component.kind === 'mirror_flat' && (
                   <MirrorRenderer
                     component={component}
                     mmToPx={mmToPx}
+                    onDragMove={handleComponentDragMove}
                     onDragEnd={handleComponentDragEnd}
                     onSelect={selectComponent}
                     isDraggable={!component.locked}
                     isSelected={state.selectedComponentId === component.id}
+                    getSnappedDragPositionPx={getSnappedDragPositionPx}
                   />
                 )}
                 {component.kind === 'lens_thin' && (
@@ -459,30 +481,49 @@ export const Canvas: React.FC<CanvasProps> = ({
                   <CavityRenderer
                     component={component}
                     mmToPx={mmToPx}
+                    onDragMove={handleComponentDragMove}
                     onDragEnd={handleComponentDragEnd}
                     onSelect={selectComponent}
                     isDraggable={!component.locked}
                     isSelected={state.selectedComponentId === component.id}
+                    getSnappedDragPositionPx={getSnappedDragPositionPx}
                   />
                 )}
                 {component.kind === 'target' && (
                   <TargetRenderer
                     component={component}
                     mmToPx={mmToPx}
+                    onDragMove={handleComponentDragMove}
                     onDragEnd={handleComponentDragEnd}
                     onSelect={selectComponent}
                     isDraggable={!component.locked}
                     isSelected={state.selectedComponentId === component.id}
+                    getSnappedDragPositionPx={getSnappedDragPositionPx}
                   />
                 )}
                 {component.kind === 'beam_stop' && (
                   <BeamStopRenderer
                     component={component}
                     mmToPx={mmToPx}
+                    onDragMove={handleComponentDragMove}
                     onDragEnd={handleComponentDragEnd}
                     onSelect={selectComponent}
                     isDraggable={!component.locked}
                     isSelected={state.selectedComponentId === component.id}
+                    getSnappedDragPositionPx={getSnappedDragPositionPx}
+                  />
+                )}
+                {component.kind === 'custom_object' && (
+                  <CustomObjectRenderer
+                    component={component}
+                    mmToPx={mmToPx}
+                    onDragMove={handleComponentDragMove}
+                    onDragEnd={handleComponentDragEnd}
+                    onSelect={selectComponent}
+                    isDraggable={!component.locked}
+                    isSelected={state.selectedComponentId === component.id}
+                    axisDirection={lensAxisDirection(beamPath, component.id, component.position)}
+                    getSnappedDragPositionPx={getSnappedDragPositionPx}
                   />
                 )}
               </React.Fragment>
@@ -492,7 +533,10 @@ export const Canvas: React.FC<CanvasProps> = ({
       </Stage>
 
       {selected && selectedOverlayPos && (
-        <div className="canvas-selection-popover" style={{ left: selectedOverlayPos.left, top: selectedOverlayPos.top }}>
+        <div
+          className={stabilityPanelOpen ? 'canvas-selection-popover canvas-selection-popover--wide' : 'canvas-selection-popover'}
+          style={{ left: selectedOverlayPos.left, top: selectedOverlayPos.top }}
+        >
           <div className="canvas-selection-topbar">
             <div className="canvas-selection-header">{selected.label}</div>
             <div className="canvas-selection-topbar-actions">
@@ -578,9 +622,6 @@ export const Canvas: React.FC<CanvasProps> = ({
                   <img className="icon-glyph" src={rotateCwIcon} alt="" />
                 </button>
               </>
-            )}
-            {selected.kind === 'cavity_fp' && isSelectedOnPath && (
-              <span className="canvas-rotation-locked-hint">Direction follows the beam</span>
             )}
           </div>
 
@@ -715,6 +756,61 @@ export const Canvas: React.FC<CanvasProps> = ({
             </div>
           )}
 
+          {selected.kind === 'custom_object' && (
+            <div className="canvas-source-editor">
+              <label>
+                Index of refraction
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={formatFixed3(selected.indexOfRefraction)}
+                  onChange={(event) => {
+                    const value = Number(event.target.value);
+                    if (Number.isFinite(value)) {
+                      dispatch({
+                        type: 'UPDATE_COMPONENT',
+                        payload: { id: selected.id, updates: { indexOfRefraction: Math.max(0.01, round3(value)) } },
+                      });
+                    }
+                  }}
+                  onKeyDown={(event) =>
+                    handleCaretStepKeyDown(event, (value) => {
+                      dispatch({
+                        type: 'UPDATE_COMPONENT',
+                        payload: { id: selected.id, updates: { indexOfRefraction: Math.max(0.01, round3(value)) } },
+                      });
+                    })
+                  }
+                />
+              </label>
+              <label>
+                Thickness (mm)
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={formatFixed3(selected.thickness)}
+                  onChange={(event) => {
+                    const value = Number(event.target.value);
+                    if (Number.isFinite(value)) {
+                      dispatch({
+                        type: 'UPDATE_COMPONENT',
+                        payload: { id: selected.id, updates: { thickness: Math.max(0.001, round3(value)) } },
+                      });
+                    }
+                  }}
+                  onKeyDown={(event) =>
+                    handleCaretStepKeyDown(event, (value) => {
+                      dispatch({
+                        type: 'UPDATE_COMPONENT',
+                        payload: { id: selected.id, updates: { thickness: Math.max(0.001, round3(value)) } },
+                      });
+                    })
+                  }
+                />
+              </label>
+            </div>
+          )}
+
           {selected.kind === 'target' && (
             <div className="canvas-source-editor">
               <label>
@@ -771,84 +867,98 @@ export const Canvas: React.FC<CanvasProps> = ({
           )}
 
           {selected.kind === 'cavity_fp' && (
-            <div className="canvas-source-editor">
-              <label>
-                Length (mm)
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  value={formatFixed3(selected.length)}
-                  onChange={(event) => {
-                    const value = Number(event.target.value);
-                    if (Number.isFinite(value)) {
-                      dispatch({
-                        type: 'UPDATE_COMPONENT',
-                        payload: { id: selected.id, updates: { length: round3(Math.max(1, value)) } },
-                      });
-                    }
-                  }}
-                  onKeyDown={(event) =>
-                    handleCaretStepKeyDown(event, (value) => {
-                      dispatch({
-                        type: 'UPDATE_COMPONENT',
-                        payload: { id: selected.id, updates: { length: round3(Math.max(1, value)) } },
-                      });
-                    })
-                  }
-                />
-              </label>
-              <label>
-                R1 (mm)
-                <div className="canvas-radius-row">
+            <div className="canvas-cavity-body">
+              <div className="canvas-source-editor">
+                <label>
+                  Length (mm)
                   <input
                     type="text"
                     inputMode="decimal"
-                    className="canvas-radius-input"
-                    value={Number.isFinite(selected.r1) ? formatFixed3(selected.r1) : ''}
-                    placeholder="Infinity"
-                    onChange={(event) => updateCavityRadius(dispatch, selected.id, 'r1', event.target.value)}
+                    value={formatFixed3(selected.length)}
+                    onChange={(event) => {
+                      const value = Number(event.target.value);
+                      if (Number.isFinite(value)) {
+                        dispatch({
+                          type: 'UPDATE_COMPONENT',
+                          payload: { id: selected.id, updates: { length: round3(Math.max(1, value)) } },
+                        });
+                      }
+                    }}
                     onKeyDown={(event) =>
-                      handleCaretStepKeyDown(event, (value) => updateCavityRadius(dispatch, selected.id, 'r1', String(value)))
+                      handleCaretStepKeyDown(event, (value) => {
+                        dispatch({
+                          type: 'UPDATE_COMPONENT',
+                          payload: { id: selected.id, updates: { length: round3(Math.max(1, value)) } },
+                        });
+                      })
                     }
                   />
-                  <label className="canvas-radius-flat-toggle">
-                    <input
-                      type="checkbox"
-                      checked={!Number.isFinite(selected.r1)}
-                      onChange={(event) =>
-                        updateCavityRadius(dispatch, selected.id, 'r1', event.target.checked ? '' : '100')
-                      }
-                    />
-                    flat
+                </label>
+                <div className="canvas-radius-pair">
+                  <label>
+                    RoC1 (mm)
+                    <div className="canvas-radius-row">
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        className="canvas-radius-input"
+                        value={Number.isFinite(selected.r1) ? formatFixed3(selected.r1) : ''}
+                        placeholder="Infinity"
+                        onChange={(event) => updateCavityRadius(dispatch, selected.id, 'r1', event.target.value)}
+                        onKeyDown={(event) =>
+                          handleCaretStepKeyDown(event, (value) => updateCavityRadius(dispatch, selected.id, 'r1', String(value)))
+                        }
+                      />
+                      <label className="canvas-radius-flat-toggle">
+                        <input
+                          type="checkbox"
+                          checked={!Number.isFinite(selected.r1)}
+                          onChange={(event) =>
+                            updateCavityRadius(dispatch, selected.id, 'r1', event.target.checked ? '' : '100')
+                          }
+                        />
+                        flat
+                      </label>
+                    </div>
+                  </label>
+                  <label>
+                    RoC2 (mm)
+                    <div className="canvas-radius-row">
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        className="canvas-radius-input"
+                        value={Number.isFinite(selected.r2) ? formatFixed3(selected.r2) : ''}
+                        placeholder="Infinity"
+                        onChange={(event) => updateCavityRadius(dispatch, selected.id, 'r2', event.target.value)}
+                        onKeyDown={(event) =>
+                          handleCaretStepKeyDown(event, (value) => updateCavityRadius(dispatch, selected.id, 'r2', String(value)))
+                        }
+                      />
+                      <label className="canvas-radius-flat-toggle">
+                        <input
+                          type="checkbox"
+                          checked={!Number.isFinite(selected.r2)}
+                          onChange={(event) =>
+                            updateCavityRadius(dispatch, selected.id, 'r2', event.target.checked ? '' : '100')
+                          }
+                        />
+                        flat
+                      </label>
+                    </div>
                   </label>
                 </div>
-              </label>
-              <label>
-                R2 (mm)
-                <div className="canvas-radius-row">
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    className="canvas-radius-input"
-                    value={Number.isFinite(selected.r2) ? formatFixed3(selected.r2) : ''}
-                    placeholder="Infinity"
-                    onChange={(event) => updateCavityRadius(dispatch, selected.id, 'r2', event.target.value)}
-                    onKeyDown={(event) =>
-                      handleCaretStepKeyDown(event, (value) => updateCavityRadius(dispatch, selected.id, 'r2', String(value)))
-                    }
-                  />
-                  <label className="canvas-radius-flat-toggle">
-                    <input
-                      type="checkbox"
-                      checked={!Number.isFinite(selected.r2)}
-                      onChange={(event) =>
-                        updateCavityRadius(dispatch, selected.id, 'r2', event.target.checked ? '' : '100')
-                      }
-                    />
-                    flat
-                  </label>
-                </div>
-              </label>
+                <button
+                  type="button"
+                  className="cavity-stability-toggle"
+                  onClick={() => setShowStability((open) => !open)}
+                >
+                  {showStability ? 'Hide Stability' : 'See Stability'}
+                </button>
+              </div>
+              {showStability && (
+                <CavityStabilityDiagram lengthMm={selected.length} r1Mm={selected.r1} r2Mm={selected.r2} />
+              )}
             </div>
           )}
         </div>
@@ -984,6 +1094,7 @@ function round3(value: number): number {
 function getSelectionCardHeight(kind: OpticalComponent['kind']) {
   if (kind === 'source') return 270;
   if (kind === 'cavity_fp') return 290;
+  if (kind === 'custom_object') return 250;
   return 220;
 }
 

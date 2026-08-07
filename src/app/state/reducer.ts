@@ -16,6 +16,7 @@ import type {
   CardinalDirection,
   GridStandard,
 } from './schema';
+import { DEFAULT_OPTIMISER_STATE } from './defaultState';
 
 /**
  * All possible actions that can be dispatched to update AppState.
@@ -32,9 +33,18 @@ export type AppAction =
   | { type: 'UPDATE_SOLVER_SOLUTIONS'; payload: any[] } // OptimiserSolution[]
   | { type: 'SET_SOLVER_STATUS'; payload: 'idle' | 'running' | 'solved' | 'failed' }
   | { type: 'SET_SOLVER_PREVIEW_INDEX'; payload: { index: number | null } }
+  | { type: 'SET_AVOID_COLLISIONS'; payload: { avoidCollisions: boolean } }
+  | { type: 'SET_MANUAL_RANGES_ENABLED'; payload: { enabled: boolean } }
+  | { type: 'ADD_MANUAL_RANGE'; payload: {} }
+  | { type: 'UPDATE_MANUAL_RANGE'; payload: { id: string; updates: Partial<{ startZMm: number; endZMm: number }> } }
+  | { type: 'REMOVE_MANUAL_RANGE'; payload: { id: string } }
   | { type: 'CLEAR_SOLVER_SNAPSHOT'; payload: {} }
   | { type: 'RESET_STATE' }
   | { type: 'LOAD_STATE'; payload: AppState };
+
+function createDefaultManualRange(): { id: string; startZMm: number; endZMm: number } {
+  return { id: `manual-range-${crypto.randomUUID()}`, startZMm: 0, endZMm: 100 };
+}
 
 /**
  * Reduce an action into a new AppState.
@@ -184,6 +194,69 @@ export function appStateReducer(state: AppState, action: AppAction): AppState {
       };
     }
 
+    case 'SET_AVOID_COLLISIONS': {
+      const { avoidCollisions } = action.payload;
+      return {
+        ...state,
+        optimiser: {
+          ...state.optimiser,
+          avoidCollisions,
+        },
+      };
+    }
+
+    case 'SET_MANUAL_RANGES_ENABLED': {
+      const { enabled } = action.payload;
+      // Surface one empty range as soon as the toggle is switched on, rather
+      // than requiring an extra click on "+" before there's anything to edit.
+      const manualRanges =
+        enabled && state.optimiser.manualRanges.length === 0
+          ? [createDefaultManualRange()]
+          : state.optimiser.manualRanges;
+      return {
+        ...state,
+        optimiser: {
+          ...state.optimiser,
+          manualRangesEnabled: enabled,
+          manualRanges,
+        },
+      };
+    }
+
+    case 'ADD_MANUAL_RANGE': {
+      return {
+        ...state,
+        optimiser: {
+          ...state.optimiser,
+          manualRanges: [...state.optimiser.manualRanges, createDefaultManualRange()],
+        },
+      };
+    }
+
+    case 'UPDATE_MANUAL_RANGE': {
+      const { id, updates } = action.payload;
+      return {
+        ...state,
+        optimiser: {
+          ...state.optimiser,
+          manualRanges: state.optimiser.manualRanges.map((range) =>
+            range.id === id ? { ...range, ...updates } : range,
+          ),
+        },
+      };
+    }
+
+    case 'REMOVE_MANUAL_RANGE': {
+      const { id } = action.payload;
+      return {
+        ...state,
+        optimiser: {
+          ...state.optimiser,
+          manualRanges: state.optimiser.manualRanges.filter((range) => range.id !== id),
+        },
+      };
+    }
+
     case 'CLEAR_SOLVER_SNAPSHOT': {
       return {
         ...state,
@@ -204,13 +277,7 @@ export function appStateReducer(state: AppState, action: AppAction): AppState {
         sourceId: null,
         selectedComponentId: null,
         targetMode: null,
-        optimiser: {
-          status: 'idle',
-          solutions: [],
-          previewedSolutionIndex: null,
-          preRunSnapshot: null,
-          snapshotValid: false,
-        },
+        optimiser: DEFAULT_OPTIMISER_STATE,
       };
     }
 

@@ -16,8 +16,15 @@ import { appStateReducer } from './reducer';
 import { resolveAppState } from './stateResolver';
 import type { PropagationEngine, CavitySolver } from './types/Layer0Interfaces';
 import { runModeMatchSolver } from './solverService';
+import { createInitialAppState } from './componentFactories';
+import { clearStoredState, saveStateToStorage } from './persistence';
 
 export type StateListener = (state: AppState) => void;
+
+// Drag and other continuous interactions dispatch many times per second;
+// debounce autosave so it writes to localStorage once things settle rather
+// than on every intermediate frame.
+const AUTOSAVE_DEBOUNCE_MS = 400;
 
 /**
  * AppStore — the central state machine.
@@ -30,6 +37,7 @@ export class AppStore {
   private listeners: Set<StateListener> = new Set();
   private propagationEngine?: PropagationEngine;
   private cavitySolver?: CavitySolver;
+  private autosaveTimer: ReturnType<typeof setTimeout> | null = null;
 
   constructor(
     initialState: AppState,
@@ -57,6 +65,31 @@ export class AppStore {
 
     // Step 4: Notify all subscribers
     this.notifyListeners();
+
+    // Step 5: Autosave (debounced)
+    this.scheduleAutosave();
+  }
+
+  /**
+   * Clear the table back to its initial default and drop the autosaved copy.
+   */
+  resetTable(): void {
+    if (this.autosaveTimer !== null) {
+      clearTimeout(this.autosaveTimer);
+      this.autosaveTimer = null;
+    }
+    clearStoredState();
+    this.dispatch({ type: 'LOAD_STATE', payload: createInitialAppState() });
+  }
+
+  private scheduleAutosave(): void {
+    if (this.autosaveTimer !== null) {
+      clearTimeout(this.autosaveTimer);
+    }
+    this.autosaveTimer = setTimeout(() => {
+      this.autosaveTimer = null;
+      saveStateToStorage(this.state);
+    }, AUTOSAVE_DEBOUNCE_MS);
   }
 
   /**
