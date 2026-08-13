@@ -249,7 +249,15 @@ export function Sidebar() {
         : '';
 
   return (
-    <aside className="sidebar" aria-label="Simulation controls">
+    <aside
+      className="sidebar"
+      aria-label="Simulation controls"
+      style={{
+        gridTemplateRows: modeMatchingOpen
+          ? 'auto minmax(160px, 1fr) minmax(160px, 1fr)'
+          : 'auto minmax(280px, 1.35fr) auto',
+      }}
+    >
       <section className="panel file-toolbar-panel">
         <div className="file-toolbar">
           <span className="file-toolbar-label">Table file</span>
@@ -287,7 +295,7 @@ export function Sidebar() {
         </div>
       </section>
 
-      <section className="panel">
+      <section className="panel component-panel">
         <header className="panel-header">
           <div>
             <h3>Beam Path Components</h3>
@@ -315,10 +323,11 @@ export function Sidebar() {
             <table className="component-table">
               <thead>
                 <tr>
-                  <th>Lbl</th>
+                  <th>Label</th>
                   <th>Type</th>
                   <th><ColumnTitle title="Z" unit="mm" /></th>
-                  <th>Prop</th>
+                  <th><ColumnTitle title="ΔZ" unit="mm" /></th>
+                  <th>Property</th>
                   <th><ColumnTitle title="Sensitivity" unit="%/mm²" /></th>
                   <th className="icon-col"></th>
                   <th className="icon-col"></th>
@@ -326,9 +335,20 @@ export function Sidebar() {
                 </tr>
               </thead>
               <tbody>
-                {orderedComponents.map((component) => {
+                {(() => {
+                  // Tracks the previous row's path position as the rows render in
+                  // path order, so each row's Delta Z cell can measure from it.
+                  // Captured into a per-row const (rowPreviousPathPosition) below,
+                  // since this outer `let` is shared/mutated across iterations and
+                  // would otherwise be stale by the time an onChange handler runs.
+                  let previousPathPosition: number | null = null;
+                  return orderedComponents.map((component) => {
                   const isSelected = state.selectedComponentId === component.id;
                   const pathPosition = getComponentPathPosition(state.sourceId, state.beamPath, component.id);
+                  const rowPreviousPathPosition = previousPathPosition;
+                  if (pathPosition !== null) {
+                    previousPathPosition = pathPosition;
+                  }
                   const warnings = proximityByComponent[component.id] ?? [];
                   const isUnstableCavity =
                     component.kind === 'cavity_fp' && hasSolvedSource && component.eigenmode === null;
@@ -364,6 +384,9 @@ export function Sidebar() {
                       </td>
                       <td>{shortKind(component.kind)}</td>
                       <td>{renderZCell(component, pathPosition, state, dispatch)}</td>
+                      <td>
+                        {renderDeltaZCell(component, pathPosition, rowPreviousPathPosition, state, dispatch)}
+                      </td>
                       <td>{renderPropertyCell(component, dispatch)}</td>
                       <td>
                         <span className="sensitivity-cell">{formatSensitivity(component)}</span>
@@ -421,14 +444,15 @@ export function Sidebar() {
                       </td>
                     </tr>
                   );
-                })}
+                  });
+                })()}
               </tbody>
             </table>
           </div>
         </div>
       </section>
 
-      <section className="panel">
+      <section className="panel mode-matching-panel">
         <header className="panel-header">
           <div>
             <h3>Mode Matching</h3>
@@ -676,6 +700,66 @@ function renderZCell(
         handleCaretStepKeyDown(event, (value) => {
           event.stopPropagation();
           commitZ(value);
+        })
+      }
+    />
+  );
+}
+
+/**
+ * Delta Z reports the gap along the beam path from the previous row (source,
+ * mirror, or anything else with its own path position). It mirrors the Z
+ * column's editability: mirrors stay read-only (see renderZCell), and there's
+ * nothing to measure from for the very first on-path row, so both render a
+ * plain span instead of an input. Editing it re-targets this component's
+ * absolute Z to `previousPathPosition + typed value`, through the same
+ * moveComponentToPathZ path the Z column itself uses.
+ */
+function renderDeltaZCell(
+  component: OpticalComponent,
+  pathPosition: number | null,
+  previousPathPosition: number | null,
+  state: AppState,
+  dispatch: ReturnType<typeof useAppStore>['dispatch'],
+) {
+  const deltaZ =
+    pathPosition !== null && previousPathPosition !== null ? pathPosition - previousPathPosition : null;
+
+  if (component.kind === 'mirror_flat') {
+    const text = pathPosition === null ? 'off-path' : deltaZ === null ? '—' : formatFixed3(deltaZ);
+    return <span className="path-position-cell">{text}</span>;
+  }
+
+  if (previousPathPosition === null) {
+    return <span className="path-position-cell">—</span>;
+  }
+
+  const commitDeltaZ = (value: number) => {
+    const position = moveComponentToPathZ(state, component.id, previousPathPosition + value);
+    if (position) {
+      dispatch({ type: 'UPDATE_COMPONENT', payload: { id: component.id, updates: { position } } });
+    }
+  };
+
+  return (
+    <input
+      className="delta-z-cell-input"
+      type="text"
+      inputMode="decimal"
+      disabled={component.locked}
+      value={deltaZ === null ? '' : formatFixed3(deltaZ)}
+      placeholder={pathPosition === null ? 'off-path' : undefined}
+      onChange={(event) => {
+        event.stopPropagation();
+        const value = Number(event.target.value);
+        if (Number.isFinite(value)) {
+          commitDeltaZ(value);
+        }
+      }}
+      onKeyDown={(event) =>
+        handleCaretStepKeyDown(event, (value) => {
+          event.stopPropagation();
+          commitDeltaZ(value);
         })
       }
     />
@@ -944,7 +1028,7 @@ function formatSensitivity(component: OpticalComponent): string {
   if (component.kind !== 'lens_thin' || component.sensitivity === null) {
     return '—'; // em dash
   }
-  return `${formatFixed3(component.sensitivity)} %/mm²`;
+  return formatFixed3(component.sensitivity);
 }
 
 function clamp(value: number, min: number, max: number): number {

@@ -1,8 +1,9 @@
 import React, { useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import {
+  Area,
   CartesianGrid,
+  ComposedChart,
   Line,
-  LineChart,
   ReferenceArea,
   ReferenceDot,
   ReferenceLine,
@@ -47,6 +48,8 @@ interface ModeProjection {
   z0Mm: number;
   isSelected: boolean;
 }
+
+const EIGENMODE_AREA_SAMPLES = 24;
 
 function buildFallbackProfile(source: SourceComponent | null, beamPath: BeamPath | null): ProfilePoint[] {
   if (!beamPath || beamPath.segments.length === 0) {
@@ -101,6 +104,27 @@ function wrapPhaseDeg(deg: number): number {
 
 function formatGouyPhaseDeg(deg: number): string {
   return `${deg.toFixed(1)} deg`;
+}
+
+/**
+ * Recharts' built-in `position: 'insideRight'` + `angle: 90` combination anchors
+ * rotated text by its edge rather than its center, so the label drifts well off
+ * the vertical middle of the plot area for anything longer than a couple of
+ * characters. Render it manually instead: text-anchor "middle" keeps it centered
+ * along its (rotated) length around the axis viewbox's vertical midpoint.
+ */
+function renderGouyPhaseAxisLabel(props: any) {
+  const viewBox = props?.viewBox;
+  if (!viewBox) {
+    return <g />;
+  }
+  const x = viewBox.x + viewBox.width - 6;
+  const y = viewBox.y + viewBox.height / 2;
+  return (
+    <text x={x} y={y} textAnchor="middle" transform={`rotate(90, ${x}, ${y})`} fill="#6f52d9" fontSize={11}>
+      Gouy phase (deg)
+    </text>
+  );
 }
 
 function formatAxisMax(value: number): string {
@@ -355,6 +379,60 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
     return list;
   }, [beamPath, components, targetMode]);
 
+  // Every cavity's eigenmode is always shaded across its own physical extent
+  // (M1 to M2), independent of that cavity's showProjection toggle above -
+  // which instead controls the optional comparison line extended across the
+  // *entire* unfolded path.
+  const cavityEigenmodeAreas = useMemo(() => {
+    if (!beamPath) {
+      return [] as Array<{ id: string; m1ZMm: number; m2ZMm: number; w0Mm: number; z0Mm: number }>;
+    }
+
+    const areas: Array<{ id: string; m1ZMm: number; m2ZMm: number; w0Mm: number; z0Mm: number }> = [];
+    for (const segment of beamPath.segments) {
+      const id = segment.terminatedByComponentId;
+      if (!id) {
+        continue;
+      }
+
+      const component = components[id];
+      if (!component || component.kind !== 'cavity_fp' || !component.eigenmode) {
+        continue;
+      }
+
+      // component.position anchors the input mirror (M1).
+      const m1ZMm = segment.zEnd;
+      areas.push({
+        id,
+        m1ZMm,
+        m2ZMm: m1ZMm + component.length,
+        w0Mm: component.eigenmode.waistRadius,
+        z0Mm: m1ZMm + component.eigenmode.waistPositionFromM1,
+      });
+    }
+
+    return areas;
+  }, [beamPath, components]);
+
+  const cavityEigenmodeSamples = useMemo(() => {
+    if (cavityEigenmodeAreas.length === 0 || !source) {
+      return [] as Array<{ id: string; points: Array<{ z: number; wMm: number }>; peakWMm: number }>;
+    }
+
+    return cavityEigenmodeAreas.map((area) => {
+      const points: Array<{ z: number; wMm: number }> = [];
+      let peakWMm = 0;
+      for (let i = 0; i <= EIGENMODE_AREA_SAMPLES; i += 1) {
+        const t = i / EIGENMODE_AREA_SAMPLES;
+        const z = area.m1ZMm + t * (area.m2ZMm - area.m1ZMm);
+        const wMm = beamRadiusFromWaist(area.w0Mm, area.z0Mm, z, source.wavelength);
+        points.push({ z, wMm });
+        peakWMm = Math.max(peakWMm, wMm);
+      }
+      return { id: area.id, points, peakWMm };
+    });
+  }, [cavityEigenmodeAreas, source]);
+
   // Target objects always show a marker at their own desired waist size,
   // independent of whether their full mode projection is toggled on.
   const targetWaistMarkers = useMemo(() => {
@@ -415,7 +493,10 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
       }
     }
     return Math.max(maxValue, pointMax);
-  }, targetWaistMarkers.reduce((max, marker) => Math.max(max, marker.w), 0));
+  }, Math.max(
+    targetWaistMarkers.reduce((max, marker) => Math.max(max, marker.w), 0),
+    cavityEigenmodeSamples.reduce((max, sample) => Math.max(max, sample.peakWMm), 0),
+  ));
   const dataXMaxMm = profileData[profileData.length - 1]?.z ?? 0;
   const effectiveYMaxMm = Math.max(lockYAxis ? lockedYMaxMm : profileMaxMm, 0.001);
   const effectiveXMaxMm = Math.max(lockXAxis ? lockedXMaxMm : dataXMaxMm, 0.001);
@@ -424,6 +505,14 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
   const axisUnitLabel = useMicronAxis ? 'um' : 'mm';
   const roundedYAxisMax = Math.max(1, Math.ceil(effectiveYMaxMm * axisScale));
   const roundedXAxisMax = Math.max(1, Math.ceil(effectiveXMaxMm));
+  const cavityEigenmodeChartData = useMemo(
+    () =>
+      cavityEigenmodeSamples.map((sample) => ({
+        id: sample.id,
+        data: sample.points.map((point) => ({ z: point.z, eigenAxis: point.wMm * axisScale })),
+      })),
+    [cavityEigenmodeSamples, axisScale],
+  );
   const chartData: Array<Record<string, number | null>> = profileData.map((point) => {
     const scaled: Record<string, number | null> = {
       z: point.z,
@@ -602,7 +691,7 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
       <div className="profile-chart-frame" ref={frameRef}>
         <div style={{ width: '100%', height: 240 }}>
           <ResponsiveContainer>
-            <LineChart
+            <ComposedChart
               data={chartData}
               margin={{ top: 22, right: 16, bottom: 8, left: 8 }}
               onMouseMove={(state: any) => {
@@ -615,6 +704,26 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
                   render a .recharts-cartesian-grid-bg rect, which lens markers below use
                   to measure the plot area's real pixel bounds. */}
               <CartesianGrid strokeDasharray="3 3" stroke="#d5dde6" fill="transparent" />
+
+              {cavityEigenmodeChartData.map((area) => (
+                <Area
+                  key={`cavity-eigenmode-${area.id}`}
+                  data={area.data}
+                  dataKey="eigenAxis"
+                  baseValue={0}
+                  type="monotone"
+                  fill="#9013FE"
+                  fillOpacity={0.16}
+                  stroke="#9013FE"
+                  strokeOpacity={0.5}
+                  strokeWidth={1}
+                  dot={false}
+                  isAnimationActive={false}
+                  connectNulls={false}
+                  legendType="none"
+                  tooltipType="none"
+                />
+              ))}
 
               {customObjectMarkers.map((marker) => (
                 <ReferenceArea
@@ -669,7 +778,7 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
                     domain={gouyPhaseDomain ?? ['auto', 'auto']}
                     allowDataOverflow={gouyPhaseWrapped}
                     tick={{ fontSize: 11, fill: '#6f52d9' }}
-                    label={{ value: 'Gouy phase (deg)', angle: 90, position: 'insideRight', fill: '#6f52d9' }}
+                    label={renderGouyPhaseAxisLabel}
                   />
                   <Line
                     yAxisId="gouy"
@@ -786,7 +895,7 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
                   strokeWidth={2}
                 />
               ))}
-            </LineChart>
+            </ComposedChart>
           </ResponsiveContainer>
         </div>
 

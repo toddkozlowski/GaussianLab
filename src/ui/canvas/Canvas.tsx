@@ -487,6 +487,7 @@ export const Canvas: React.FC<CanvasProps> = ({
                     isDraggable={!component.locked}
                     isSelected={state.selectedComponentId === component.id}
                     getSnappedDragPositionPx={getSnappedDragPositionPx}
+                    wavelengthNm={sourceComponent?.wavelength ?? 1064}
                   />
                 )}
                 {component.kind === 'target' && (

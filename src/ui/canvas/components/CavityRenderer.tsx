@@ -12,7 +12,8 @@
 import React, { useRef } from 'react';
 import { Rect, Text, Line, Group } from 'react-konva';
 import type Konva from 'konva';
-import type { CavityFPComponent, Point2d } from '../../../app/state/schema';
+import type { CavityEigenmode, CavityFPComponent, Point2d } from '../../../app/state/schema';
+import { beamRadiusAtZ, rayleighRange } from '../../../math/qParameter';
 
 interface CavityRendererProps {
   component: CavityFPComponent;
@@ -23,6 +24,63 @@ interface CavityRendererProps {
   isDraggable: boolean;
   isSelected: boolean;
   getSnappedDragPositionPx: (component: CavityFPComponent, rawPx: Point2d) => Point2d;
+  /** Wavelength of the source feeding the table, used to size the cavity's eigenmode envelope. */
+  wavelengthNm: number;
+}
+
+const EIGENMODE_SAMPLES = 24;
+// Real cavity eigenmode radii (tens to low hundreds of microns) are sub-pixel at
+// typical table zoom, so the envelope is drawn schematically: rescaled so its
+// widest point reaches this fraction of the mirror aperture, keeping the
+// characteristic waist bulge visible while staying inside the mirrors.
+const EIGENMODE_VISUAL_FRACTION_OF_MIRROR_SPAN = 0.4;
+
+/**
+ * Outline of the cavity's TEM00 eigenmode envelope (w(z), mirrored about the
+ * axis) between M1 and M2, as a closed Konva polygon in the cavity's local
+ * (unrotated) coordinate space.
+ */
+function buildEigenmodePolygon(
+  lengthMm: number,
+  eigenmode: CavityEigenmode,
+  wavelengthNm: number,
+  m2OffsetPx: number,
+  mirrorSpanPx: number,
+  isHorizontal: boolean,
+  mmToPx: (mm: number) => number,
+): number[] {
+  const waistRadiusM = eigenmode.waistRadius / 1000;
+  const wavelengthM = wavelengthNm * 1e-9;
+  const zR = rayleighRange(waistRadiusM, wavelengthM);
+  const z0Mm = eigenmode.waistPositionFromM1;
+
+  const trueHalfWidthsPx: number[] = [];
+  for (let i = 0; i <= EIGENMODE_SAMPLES; i += 1) {
+    const t = i / EIGENMODE_SAMPLES;
+    const zMm = t * lengthMm;
+    const wMm = beamRadiusAtZ(waistRadiusM, zR, (zMm - z0Mm) / 1000) * 1000;
+    trueHalfWidthsPx.push(mmToPx(wMm));
+  }
+  const maxTrueHalfWidthPx = Math.max(...trueHalfWidthsPx, 1e-6);
+  const targetPeakHalfWidthPx = mirrorSpanPx * EIGENMODE_VISUAL_FRACTION_OF_MIRROR_SPAN;
+  const visualScale = Math.max(1, targetPeakHalfWidthPx / maxTrueHalfWidthPx);
+
+  const top: Array<[number, number]> = [];
+  const bottom: Array<[number, number]> = [];
+  for (let i = 0; i <= EIGENMODE_SAMPLES; i += 1) {
+    const t = i / EIGENMODE_SAMPLES;
+    const axisPx = t * m2OffsetPx;
+    const wPx = trueHalfWidthsPx[i] * visualScale;
+    if (isHorizontal) {
+      top.push([axisPx, -wPx]);
+      bottom.push([axisPx, wPx]);
+    } else {
+      top.push([-wPx, axisPx]);
+      bottom.push([wPx, axisPx]);
+    }
+  }
+  bottom.reverse();
+  return [...top, ...bottom].flat();
 }
 
 const CONCAVE_BOW_PX = 4;
@@ -92,6 +150,7 @@ export const CavityRenderer: React.FC<CavityRendererProps> = ({
   isDraggable,
   isSelected,
   getSnappedDragPositionPx,
+  wavelengthNm,
 }) => {
   const groupRef = useRef<Konva.Group>(null);
 
@@ -144,6 +203,29 @@ export const CavityRenderer: React.FC<CavityRendererProps> = ({
         document.body.style.cursor = 'default';
       }}
     >
+      {/* Eigenmode envelope: filled w(z) region occupying the cavity interior, always shown
+          (independent of the profile chart's separate "show projection" toggle) whenever the
+          cavity resolves to a stable mode. */}
+      {component.eigenmode && (
+        <Line
+          points={buildEigenmodePolygon(
+            Math.max(1, component.length),
+            component.eigenmode,
+            wavelengthNm,
+            m2OffsetPx,
+            mirrorSpan,
+            isHorizontal,
+            mmToPx,
+          )}
+          closed
+          fill={fillColor}
+          opacity={0.2}
+          stroke={fillColor}
+          strokeWidth={1}
+          listening={false}
+        />
+      )}
+
       {/* M1 (input mirror): reflective face at axis 0, substrate extends upstream (away from M2) */}
       <MirrorFace
         axisPos={0}

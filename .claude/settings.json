@@ -1,0 +1,11 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(rm -f \"/c/Users/toddc/AppData/Local/npm-cache/_npx/e41f203b7505f1fb\"/*.mjs)",
+      "Bash(kill %1)",
+      "Bash(lsof -ti:5173 -sTCP:LISTEN)",
+      "Bash(xargs -r kill)",
+      "Bash(node profilearea.mjs)"
+    ]
+  }
+}
