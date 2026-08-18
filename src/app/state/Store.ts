@@ -147,22 +147,7 @@ export class AppStore {
   }
 
   /**
-   * Preview one optimizer solution by applying its lens positions.
-   */
-  previewSolution(index: number): void {
-    const solution = this.state.optimiser.solutions[index];
-    if (!solution) {
-      return;
-    }
-
-    this.dispatch({ type: 'SET_SOLVER_PREVIEW_INDEX', payload: { index } });
-    Object.entries(solution.lensPositions).forEach(([id, position]) => {
-      this.dispatch({ type: 'UPDATE_COMPONENT', payload: { id, updates: { position } } });
-    });
-  }
-
-  /**
-   * Apply one optimizer solution and clear preview index.
+   * Apply one optimizer solution's lens positions.
    */
   applySolution(index: number): void {
     const solution = this.state.optimiser.solutions[index];
@@ -173,7 +158,6 @@ export class AppStore {
     Object.entries(solution.lensPositions).forEach(([id, position]) => {
       this.dispatch({ type: 'UPDATE_COMPONENT', payload: { id, updates: { position } } });
     });
-    this.dispatch({ type: 'SET_SOLVER_PREVIEW_INDEX', payload: { index: null } });
   }
 
   /**

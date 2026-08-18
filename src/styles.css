@@ -324,12 +324,19 @@ button:disabled {
   min-width: 0;
 }
 
+.profile-panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+}
+
 .profile-panel .panel-header {
   padding-top: 14px;
 }
 
 .profile-panel-body {
   padding-top: 10px;
+  min-height: 0;
 }
 
 .profile-header-title {
@@ -349,11 +356,27 @@ button:disabled {
   background: linear-gradient(180deg, #fff7de, #ffe7ad);
 }
 
+.optimizer-warning {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(173, 135, 16, 0.38);
+  background: linear-gradient(180deg, #fff7de, #ffe7ad);
+  color: #6b5410;
+  font-size: 0.78rem;
+  line-height: 1.35;
+}
+
+.optimizer-warning .icon-glyph {
+  flex: 0 0 auto;
+  width: 16px;
+  height: 16px;
+  margin-top: 1px;
+}
+
 .profile-overlap-chip {
-  position: absolute;
-  top: 10px;
-  left: 10px;
-  z-index: 3;
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -375,8 +398,7 @@ button:disabled {
 
 .profile-lens-marker {
   position: absolute;
-  bottom: 12px;
-  transform: translateX(-50%);
+  transform: translate(-50%, -50%);
   display: inline-flex;
   align-items: center;
   gap: 3px;
@@ -746,21 +768,25 @@ button:disabled {
 
 .profile-chart-shell {
   display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 6px;
+  height: 100%;
+  min-height: 0;
 }
 
 .profile-chart-toolbar {
   display: flex;
-  justify-content: flex-end;
+  justify-content: space-between;
   align-items: center;
   flex-wrap: wrap;
   gap: 14px;
 }
 
-.profile-axis-control {
-  display: inline-flex;
+.profile-chart-toolbar-toggles {
+  display: flex;
   align-items: center;
-  gap: 6px;
+  flex-wrap: wrap;
+  gap: 14px;
 }
 
 .profile-gouy-toggle {
@@ -776,37 +802,67 @@ button:disabled {
   width: auto;
 }
 
-.profile-axis-max-field {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 0.78rem;
-  color: #425264;
-  white-space: nowrap;
+.profile-chart-frame {
+  position: relative;
+  height: 100%;
+  min-height: 0;
 }
 
-.profile-axis-max-input {
-  width: 60px;
-  padding: 3px 6px;
+.profile-axis-edge-field {
+  position: absolute;
+  z-index: 3;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.profile-axis-edge-field--x-min {
+  transform: translate(0, 4px);
+}
+
+.profile-axis-edge-field--x-max {
+  transform: translate(-100%, 4px);
+}
+
+.profile-axis-edge-field--y-min {
+  transform: translate(calc(-100% - 6px), -100%);
+}
+
+.profile-axis-edge-field--y-max {
+  transform: translate(calc(-100% - 6px), -50%);
+}
+
+.profile-axis-edge-input {
+  width: 46px;
+  padding: 3px 5px;
   border-radius: 6px;
   border: 1px solid rgba(24, 33, 48, 0.24);
+  font-size: 0.74rem;
   font-variant-numeric: tabular-nums;
   text-align: right;
   cursor: text;
+  background: rgba(255, 255, 255, 0.92);
 }
 
-.profile-axis-max-input:hover {
+.profile-axis-edge-input:hover {
   border-color: rgba(45, 155, 240, 0.55);
 }
 
-.profile-axis-max-input:focus {
+.profile-axis-edge-input:focus {
   border-color: rgba(45, 155, 240, 0.75);
   outline: none;
   box-shadow: 0 0 0 2px rgba(45, 155, 240, 0.2);
 }
 
-.profile-chart-frame {
-  position: relative;
+.profile-axis-edge-lock {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+}
+
+.profile-axis-edge-lock .icon-glyph {
+  width: 12px;
+  height: 12px;
 }
 
 details > summary {
@@ -900,6 +956,13 @@ details > summary {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+.solution-table td.solution-sensitivity-cell {
+  text-align: center;
+  color: #34475a;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .stack {

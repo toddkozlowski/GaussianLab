@@ -187,6 +187,8 @@ export interface OptimiserSolution {
   id: string;
   lensPositions: Record<string, Point2d>;
   overlap: number;
+  /** Highest per-lens position-sensitivity (%/mm^2) across this solution's movable lenses, or null if unmeasured. */
+  maxLensSensitivity: number | null;
   summary: string;
 }
 
@@ -205,7 +207,6 @@ export interface ManualAdjustmentRange {
 export interface OptimiserState {
   status: SolverStatus;
   solutions: OptimiserSolution[];
-  previewedSolutionIndex: number | null;
   preRunSnapshot: Record<string, Point2d> | null;
   snapshotValid: boolean;
   /**

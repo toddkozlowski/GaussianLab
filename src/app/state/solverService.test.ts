@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { runModeMatchSolver } from './solverService';
+import { runModeMatchSolver, rankSolutions, getMovableLenses, MAX_OPTIMIZER_LENSES } from './solverService';
 import { resolveAppState } from './stateResolver';
 import {
   createSourceComponent,
@@ -406,5 +406,177 @@ describe('runModeMatchSolver manual adjustment ranges', () => {
     const bestEnabled = Math.max(...enabledSolutions.map((s) => s.overlap));
     const bestDisabled = Math.max(...disabledSolutions.map((s) => s.overlap));
     expect(bestDisabled).toBeGreaterThanOrEqual(bestEnabled);
+  });
+});
+
+describe('runModeMatchSolver wide-range search', () => {
+  it('finds a solution requiring a lens move far beyond a local +/-200mm re-centering window', () => {
+    // The true optimum for this lens/target combination sits ~890mm from the
+    // lens's starting position - well past what three passes of a
+    // +/-200mm re-centering window could ever reach (max 600mm total) - and
+    // within that reachable 620mm neighbourhood the best achievable overlap
+    // is only ~30%, so this can only be found by a first pass that samples
+    // the lens's entire collinear region (source to target) up front.
+    const source = createSourceComponent({}, { x: 0, y: 300 });
+    source.waistRadius = 0.1;
+    source.waistOffset = 0;
+    const lens = createLensThinComponent({}, { x: 20, y: 300 });
+    lens.focalLength = 900;
+    const target = createTargetComponent({}, { x: 4000, y: 300 });
+    target.waistRadius = 2;
+
+    let state: AppState = {
+      ...DEFAULT_APP_STATE,
+      table: { ...DEFAULT_APP_STATE.table, width: 4200, height: 600 },
+      sourceId: source.id,
+      components: { [source.id]: source, [lens.id]: lens, [target.id]: target },
+      targetMode: { kind: 'target', targetComponentId: target.id },
+    };
+    state = resolveAppState(state, engine);
+
+    const solutions = runModeMatchSolver(state, engine, 5);
+    expect(solutions.length).toBeGreaterThan(0);
+
+    const best = solutions[0];
+    expect(best.overlap).toBeGreaterThan(0.85);
+
+    const movedDistance = Math.abs(best.lensPositions[lens.id].x - lens.position.x);
+    expect(movedDistance).toBeGreaterThan(600);
+  });
+});
+
+describe('runModeMatchSolver lens count cap', () => {
+  it('excludes locked and optimiser-disabled lenses from getMovableLenses', () => {
+    const source = createSourceComponent({}, { x: 50, y: 300 });
+    const movable = createLensThinComponent({}, { x: 150, y: 300 });
+    const lockedLens = createLensThinComponent({}, { x: 250, y: 300 });
+    lockedLens.locked = true;
+    const disabledLens = createLensThinComponent({}, { x: 350, y: 300 });
+    disabledLens.optimiserCanMove = false;
+
+    const state: AppState = {
+      ...DEFAULT_APP_STATE,
+      sourceId: source.id,
+      components: {
+        [source.id]: source,
+        [movable.id]: movable,
+        [lockedLens.id]: lockedLens,
+        [disabledLens.id]: disabledLens,
+      },
+    };
+
+    const movableLenses = getMovableLenses(state);
+    expect(movableLenses.map((l) => l.id)).toEqual([movable.id]);
+  });
+
+  it('refuses to run (returns no solutions) when more than the cap of movable lenses are present', () => {
+    const source = createSourceComponent({}, { x: 0, y: 300 });
+    const target = createTargetComponent({}, { x: 900, y: 300 });
+    target.waistRadius = 0.3;
+
+    const components: AppState['components'] = { [source.id]: source, [target.id]: target };
+    for (let i = 0; i < MAX_OPTIMIZER_LENSES + 1; i += 1) {
+      const lens = createLensThinComponent(components, { x: 100 + i * 100, y: 300 });
+      components[lens.id] = lens;
+    }
+
+    let state: AppState = {
+      ...DEFAULT_APP_STATE,
+      sourceId: source.id,
+      components,
+      targetMode: { kind: 'target', targetComponentId: target.id },
+    };
+    state = resolveAppState(state, engine, cavitySolver);
+
+    expect(getMovableLenses(state).length).toBe(MAX_OPTIMIZER_LENSES + 1);
+    expect(runModeMatchSolver(state, engine, 5)).toEqual([]);
+  });
+
+  it('runs normally with exactly the cap of movable lenses', () => {
+    const source = createSourceComponent({}, { x: 0, y: 300 });
+    const target = createTargetComponent({}, { x: 900, y: 300 });
+    target.waistRadius = 0.3;
+
+    const components: AppState['components'] = { [source.id]: source, [target.id]: target };
+    for (let i = 0; i < MAX_OPTIMIZER_LENSES; i += 1) {
+      const lens = createLensThinComponent(components, { x: 100 + i * 100, y: 300 });
+      components[lens.id] = lens;
+    }
+
+    let state: AppState = {
+      ...DEFAULT_APP_STATE,
+      sourceId: source.id,
+      components,
+      targetMode: { kind: 'target', targetComponentId: target.id },
+    };
+    state = resolveAppState(state, engine, cavitySolver);
+
+    expect(getMovableLenses(state).length).toBe(MAX_OPTIMIZER_LENSES);
+    const solutions = runModeMatchSolver(state, engine, 5);
+    expect(solutions.length).toBeGreaterThan(0);
+  });
+});
+
+describe('runModeMatchSolver sensitivity reporting', () => {
+  it('attaches a numeric maxLensSensitivity to every returned solution', () => {
+    const source = createSourceComponent({}, { x: 50, y: 300 });
+    const lens = createLensThinComponent({}, { x: 250, y: 300 });
+    const target = createTargetComponent({}, { x: 600, y: 300 });
+    target.waistRadius = 0.3;
+
+    let state: AppState = {
+      ...DEFAULT_APP_STATE,
+      sourceId: source.id,
+      components: { [source.id]: source, [lens.id]: lens, [target.id]: target },
+      targetMode: { kind: 'target', targetComponentId: target.id },
+    };
+    state = resolveAppState(state, engine, cavitySolver);
+
+    const solutions = runModeMatchSolver(state, engine, 5);
+    expect(solutions.length).toBeGreaterThan(0);
+
+    for (const solution of solutions) {
+      expect(typeof solution.maxLensSensitivity === 'number' || solution.maxLensSensitivity === null).toBe(true);
+      if (typeof solution.maxLensSensitivity === 'number') {
+        expect(solution.maxLensSensitivity).toBeGreaterThanOrEqual(0);
+      }
+    }
+  });
+});
+
+describe('rankSolutions', () => {
+  function makeSolution(overlap: number, maxLensSensitivity: number | null, id: string): OptimiserSolution {
+    return { id, lensPositions: {}, overlap, maxLensSensitivity, summary: '' };
+  }
+
+  it('re-ranks a tied 100%-overlap group by ascending sensitivity, leaving lower-overlap solutions in place', () => {
+    const solutions = [
+      makeSolution(1, 9, 'a'), // 100%, high sensitivity - should move down
+      makeSolution(1, 2, 'b'), // 100%, low sensitivity - should move up
+      makeSolution(0.8, 0.1, 'c'), // not tied for first - order among these is untouched
+      makeSolution(1, 5, 'd'), // 100%, mid sensitivity
+      makeSolution(0.5, 0.05, 'e'),
+    ];
+
+    const ranked = rankSolutions(solutions);
+
+    expect(ranked.map((s) => s.id)).toEqual(['b', 'd', 'a', 'c', 'e']);
+  });
+
+  it('treats a null sensitivity as worst-case, sorting it after every measured value', () => {
+    const solutions = [
+      makeSolution(1, null, 'unmeasured'),
+      makeSolution(1, 3, 'measured'),
+    ];
+
+    const ranked = rankSolutions(solutions);
+
+    expect(ranked.map((s) => s.id)).toEqual(['measured', 'unmeasured']);
+  });
+
+  it('leaves a single 100% solution and non-tied solutions untouched', () => {
+    const solutions = [makeSolution(1, 7, 'only'), makeSolution(0.9, 1, 'second'), makeSolution(0.7, 2, 'third')];
+
+    expect(rankSolutions(solutions).map((s) => s.id)).toEqual(['only', 'second', 'third']);
   });
 });

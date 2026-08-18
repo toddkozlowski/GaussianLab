@@ -14,8 +14,10 @@ import type { AppState, CardinalDirection, OpticalComponent, Point2d, TargetMode
 import {
   computeDangerousPairs,
   getComponentPathPosition,
+  getMovableLenses,
   moveComponentToPathZ,
   DANGEROUS_PROXIMITY_THRESHOLD_MM,
+  MAX_OPTIMIZER_LENSES,
 } from '../state';
 import { snapPointToGrid } from '../state/snapToGrid';
 import { GAUSSIAN_FILE_EXTENSION, parseAppState, serializeAppState } from '../state/fileFormat';
@@ -49,7 +51,7 @@ function downloadTextFile(filename: string, content: string) {
 }
 
 export function Sidebar() {
-  const { state, dispatch, runSolver, previewSolution, applySolution, resetTable } = useAppStore();
+  const { state, dispatch, runSolver, applySolution, resetTable } = useAppStore();
   const [modeMatchingOpen, setModeMatchingOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -153,6 +155,9 @@ export function Sidebar() {
     () => computeDangerousPairs(state.components, state.sourceId, state.beamPath, DANGEROUS_PROXIMITY_THRESHOLD_MM),
     [state.components, state.sourceId, state.beamPath],
   );
+
+  const movableLensCount = useMemo(() => getMovableLenses(state).length, [state.components]);
+  const tooManyMovableLenses = movableLensCount > MAX_OPTIMIZER_LENSES;
   const proximityByComponent = useMemo(() => {
     const map: Record<string, Array<{ otherLabel: string; distanceMm: number }>> = {};
     for (const pair of dangerousPairs) {
@@ -587,7 +592,21 @@ export function Sidebar() {
                 </div>
               )}
 
-              <button type="button" onClick={() => runSolver(5)}>Run optimizer</button>
+              {tooManyMovableLenses && (
+                <div className="optimizer-warning">
+                  <img className="icon-glyph" src={warningIcon} alt="" />
+                  <span>
+                    {movableLensCount} movable lenses found, but the optimizer only considers up to{' '}
+                    {MAX_OPTIMIZER_LENSES} at a time - more than that is too computationally intensive and can
+                    time out the browser. Lock the lenses you don't want included in this solve (via the lock
+                    icon in the component table) to bring the count down to {MAX_OPTIMIZER_LENSES}.
+                  </span>
+                </div>
+              )}
+
+              <button type="button" onClick={() => runSolver(5)} disabled={tooManyMovableLenses}>
+                Run optimizer
+              </button>
 
               {state.optimiser.solutions.length === 0 ? (
                 <p className="muted">No solutions yet.</p>
@@ -599,7 +618,7 @@ export function Sidebar() {
                         <th>#</th>
                         <th>Overlap</th>
                         <th>Summary</th>
-                        <th>Preview</th>
+                        <th><ColumnTitle title="Max sensitivity" unit="%/mm²" /></th>
                         <th>Apply</th>
                       </tr>
                     </thead>
@@ -609,8 +628,8 @@ export function Sidebar() {
                           <td>{index + 1}</td>
                           <td>{(solution.overlap * 100).toFixed(1)}%</td>
                           <td className="solution-summary-cell">{solution.summary}</td>
-                          <td>
-                            <button type="button" onClick={() => previewSolution(index)}>Preview</button>
+                          <td className="solution-sensitivity-cell">
+                            {solution.maxLensSensitivity === null ? '—' : formatFixed3(solution.maxLensSensitivity)}
                           </td>
                           <td>
                             <button type="button" onClick={() => applySolution(index)}>Apply</button>

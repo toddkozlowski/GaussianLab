@@ -20,7 +20,6 @@ export function useAppStore() {
     state,
     dispatch: (action: AppAction) => store.dispatch(action),
     runSolver: (maxSolutions?: number) => store.runSolver(maxSolutions),
-    previewSolution: (index: number) => store.previewSolution(index),
     applySolution: (index: number) => store.applySolution(index),
     resetTable: () => store.resetTable(),
   };

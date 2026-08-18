@@ -32,7 +32,6 @@ export type AppAction =
   | { type: 'LOCK_COMPONENT'; payload: { id: string; locked: boolean } }
   | { type: 'UPDATE_SOLVER_SOLUTIONS'; payload: any[] } // OptimiserSolution[]
   | { type: 'SET_SOLVER_STATUS'; payload: 'idle' | 'running' | 'solved' | 'failed' }
-  | { type: 'SET_SOLVER_PREVIEW_INDEX'; payload: { index: number | null } }
   | { type: 'SET_AVOID_COLLISIONS'; payload: { avoidCollisions: boolean } }
   | { type: 'SET_MANUAL_RANGES_ENABLED'; payload: { enabled: boolean } }
   | { type: 'ADD_MANUAL_RANGE'; payload: {} }
@@ -168,7 +167,6 @@ export function appStateReducer(state: AppState, action: AppAction): AppState {
         optimiser: {
           ...state.optimiser,
           solutions: action.payload,
-          previewedSolutionIndex: null, // Clear preview when new solutions arrive
         },
       };
     }
@@ -179,17 +177,6 @@ export function appStateReducer(state: AppState, action: AppAction): AppState {
         optimiser: {
           ...state.optimiser,
           status: action.payload,
-        },
-      };
-    }
-
-    case 'SET_SOLVER_PREVIEW_INDEX': {
-      const { index } = action.payload;
-      return {
-        ...state,
-        optimiser: {
-          ...state.optimiser,
-          previewedSolutionIndex: index,
         },
       };
     }

@@ -11,7 +11,6 @@ export const DEFAULT_TABLE_CONFIG: TableConfig = {
 export const DEFAULT_OPTIMISER_STATE: OptimiserState = {
   status: 'idle',
   solutions: [],
-  previewedSolutionIndex: null,
   preRunSnapshot: null,
   snapshotValid: false,
   avoidCollisions: true,

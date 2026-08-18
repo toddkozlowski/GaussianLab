@@ -1,4 +1,4 @@
-import type { AppState, ManualAdjustmentRange, OptimiserSolution } from './schema';
+import type { AppState, LensThinComponent, ManualAdjustmentRange, OptimiserSolution } from './schema';
 import type { PropagationEngine } from './types/Layer0Interfaces';
 import { optimizeGridSearch, optimizeNelderMead, defaultOptimizerConfig } from '../../math/optimizer';
 import { resolveAppState } from './stateResolver';
@@ -10,6 +10,23 @@ import {
   getComponentPathPosition,
   resolveZRangeExtents,
 } from './pathUtils';
+
+/**
+ * Hard cap on how many lenses the optimizer will consider at once. Each
+ * additional lens multiplies the coarse grid search combinatorially (see
+ * gridPts below), so beyond this it risks becoming slow enough to time out
+ * a browser tab - the UI refuses to run the optimizer past this point and
+ * tells the user to lock the lenses they don't want included.
+ */
+export const MAX_OPTIMIZER_LENSES = 3;
+
+/** Lenses eligible for the optimizer: movable and not locked out of it. */
+export function getMovableLenses(state: AppState): LensThinComponent[] {
+  return Object.values(state.components).filter(
+    (component): component is LensThinComponent =>
+      component.kind === 'lens_thin' && component.optimiserCanMove && !component.locked,
+  );
+}
 
 function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value));
@@ -133,6 +150,41 @@ function manualRangeBoundsForLens(
   return Number.isFinite(lo) && Number.isFinite(hi) && hi > lo ? [lo, hi] : null;
 }
 
+/**
+ * The full physical stretch a lens can occupy without manual ranges: its own
+ * beam-path segment, extended through any adjacent segments that share the
+ * same direction. Lenses (and other non-redirecting components) don't bend
+ * the path, so a run of same-direction segments is one straight corridor -
+ * e.g. from the source all the way to the first mirror or cavity - and a
+ * lens's *current* position (which is where its own segment happens to end)
+ * shouldn't cap how far it can be searched within that corridor.
+ */
+function collinearRegionBoundsForLens(state: AppState, lensId: string, axis: 'x' | 'y'): [number, number] | null {
+  const segments = state.beamPath?.segments;
+  if (!segments || segments.length === 0) {
+    return null;
+  }
+
+  const found = segments.findIndex((s) => s.terminatedByComponentId === lensId);
+  const index = found >= 0 ? found : 0;
+  const direction = segments[index].direction;
+
+  let lo = index;
+  while (lo > 0 && segments[lo - 1].direction === direction) {
+    lo -= 1;
+  }
+  let hi = index;
+  while (hi < segments.length - 1 && segments[hi + 1].direction === direction) {
+    hi += 1;
+  }
+
+  const start = segments[lo].start[axis];
+  const end = segments[hi].end[axis];
+  const min = Math.min(start, end);
+  const max = Math.max(start, end);
+  return max > min ? [min, max] : null;
+}
+
 type Candidate = { params: number[]; value: number };
 
 // The search window is only +/-SEARCH_SPAN wide around its center. If the true
@@ -153,11 +205,9 @@ export function runModeMatchSolver(
   propagationEngine: PropagationEngine,
   maxSolutions: number = 5,
 ): OptimiserSolution[] {
-  const movableLenses = Object.values(state.components).filter(
-    (c) => c.kind === 'lens_thin' && c.optimiserCanMove && !c.locked,
-  );
+  const movableLenses = getMovableLenses(state);
 
-  if (!state.targetMode || movableLenses.length === 0) {
+  if (!state.targetMode || movableLenses.length === 0 || movableLenses.length > MAX_OPTIMIZER_LENSES) {
     return [];
   }
 
@@ -171,16 +221,31 @@ export function runModeMatchSolver(
   // explicit, not a heuristic to re-center over multiple passes. A lens
   // whose current segment isn't reached by any range has no legal window at
   // all; pin it to its current position so it simply can't move, rather than
-  // silently falling back to the default +/-200mm search.
-  const buildBounds = (centerParams: number[]): Array<[number, number]> =>
+  // silently falling back to the default search.
+  //
+  // Otherwise, pass 0 always casts as wide as physically possible - the
+  // lens's whole collinear region (collinearRegionBoundsForLens) - so
+  // configurations requiring a large move (including two lenses swapping
+  // relative order) are reachable from the first grid search rather than
+  // only by manually repositioning first. Later passes narrow to a local
+  // +/-SEARCH_SPAN window around the best result so far, for fine
+  // refinement, still clamped inside that same region.
+  const buildBounds = (centerParams: number[], pass: number): Array<[number, number]> =>
     movableLenses.map((lens, i) => {
       const axis = lensAxes[i] as 'x' | 'y';
       if (useManualRanges) {
         return manualRangeBoundsForLens(state, lens.id, axis, manualRanges) ?? [lens.position[axis], lens.position[axis]];
       }
+
+      const regionBounds = collinearRegionBoundsForLens(state, lens.id, axis);
+      if (pass === 0 && regionBounds) {
+        return regionBounds;
+      }
+
       const tableMax = axis === 'x' ? state.table.width : state.table.height;
-      const lo = Math.max(0, centerParams[i] - SEARCH_SPAN);
-      const hi = Math.min(tableMax, centerParams[i] + SEARCH_SPAN);
+      const [regionLo, regionHi] = regionBounds ?? [0, tableMax];
+      const lo = Math.max(regionLo, centerParams[i] - SEARCH_SPAN);
+      const hi = Math.min(regionHi, centerParams[i] + SEARCH_SPAN);
       return [lo, Math.max(lo + 1, hi)];
     });
 
@@ -256,7 +321,7 @@ export function runModeMatchSolver(
   const passLimit = useManualRanges ? 1 : MAX_OPTIMIZER_PASSES;
 
   for (let pass = 0; pass < passLimit; pass++) {
-    const bounds = buildBounds(centerParams);
+    const bounds = buildBounds(centerParams, pass);
 
     // Stage 1: coarse grid search to find candidate regions.
     const gridCandidates = optimizeGridSearch(objective, bounds, gridPts, maxSolutions * 2);
@@ -298,7 +363,7 @@ export function runModeMatchSolver(
 
   const topSolutions = dedupe(allCandidates);
 
-  return topSolutions.map((sol, index) => {
+  const solutions = topSolutions.map((sol, index) => {
     const lensPositions: Record<string, { x: number; y: number }> = {};
     movableLenses.forEach((lens, i) => {
       const axis = lensAxes[i] as 'x' | 'y';
@@ -306,11 +371,50 @@ export function runModeMatchSolver(
     });
 
     const overlap = clamp01(sol.value);
+
+    // Resolve the trial state once more at this solution's exact positions
+    // to read off each lens's position-sensitivity there (attachLensSensitivities
+    // runs as part of resolveAppState/buildTrialState), then keep the worst
+    // (highest) of them as this solution's headline figure.
+    const trialState = buildTrialState(sol.params);
+    let maxLensSensitivity: number | null = null;
+    for (const lens of movableLenses) {
+      const resolvedLens = trialState.components[lens.id];
+      const value = resolvedLens?.kind === 'lens_thin' ? resolvedLens.sensitivity : null;
+      if (value !== null && (maxLensSensitivity === null || value > maxLensSensitivity)) {
+        maxLensSensitivity = value;
+      }
+    }
+
     return {
       id: `solution-${index + 1}`,
       lensPositions,
       overlap,
+      maxLensSensitivity,
       summary: `Overlap ${(overlap * 100).toFixed(1)}% — ${movableLenses.length} lens`,
     };
   });
+
+  return rankSolutions(solutions);
+}
+
+/**
+ * Solutions come in already sorted by descending overlap (from dedupe()
+ * above). Within the leading run that all read as 100.0% overlap once
+ * rounded to the precision shown in the UI, re-rank by ascending
+ * position-sensitivity - the flattest (most robust) alignment first -
+ * rather than leaving that tie broken by whatever order the search happened
+ * to find them in. Solutions below 100% keep their existing relative order.
+ */
+export function rankSolutions(solutions: OptimiserSolution[]): OptimiserSolution[] {
+  const isPerfectOverlap = (solution: OptimiserSolution) => (solution.overlap * 100).toFixed(1) === '100.0';
+  const perfect = solutions.filter(isPerfectOverlap);
+  const rest = solutions.filter((solution) => !isPerfectOverlap(solution));
+  perfect.sort((a, b) => {
+    if (a.maxLensSensitivity === null) return b.maxLensSensitivity === null ? 0 : 1;
+    if (b.maxLensSensitivity === null) return -1;
+    return a.maxLensSensitivity - b.maxLensSensitivity;
+  });
+
+  return [...perfect, ...rest];
 }

@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import App from './App';
 
 describe('Layer 5 solver workflow', () => {
-  it('supports target-object solve and solution preview/apply flow', async () => {
+  it('supports target-object solve and solution apply flow', async () => {
     render(<App />);
 
     // Ensure at least one movable lens exists for optimization.
@@ -22,17 +22,15 @@ describe('Layer 5 solver workflow', () => {
 
     fireEvent.click(screen.getByRole('button', { name: 'Run optimizer' }));
 
-    // Solver should produce at least one solution card with Preview/Apply actions.
+    // Solver should produce at least one solution card with an Apply action.
     await waitFor(() => {
-      expect(screen.getAllByRole('button', { name: 'Preview' }).length).toBeGreaterThan(0);
       expect(screen.getAllByRole('button', { name: 'Apply' }).length).toBeGreaterThan(0);
     });
 
-    // Exercise preview + apply interactions.
-    fireEvent.click(screen.getAllByRole('button', { name: 'Preview' })[0]);
+    // Exercise the apply interaction.
     fireEvent.click(screen.getAllByRole('button', { name: 'Apply' })[0]);
 
-    // Solver summaries remain present after preview/apply operations.
+    // Solver summaries remain present after the apply operation.
     expect(screen.getAllByText(/Overlap/i).length).toBeGreaterThan(0);
   });
 });

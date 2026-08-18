@@ -127,9 +127,70 @@ function renderGouyPhaseAxisLabel(props: any) {
   );
 }
 
+/**
+ * The default 'insideBottomRight' position sits right at the axis line,
+ * which collides with the editable X-max field overlaid just below it.
+ * Render the title further down (still inside the chart's own bottom
+ * margin) so the two never overlap.
+ */
+function renderXAxisLabel(props: any) {
+  const viewBox = props?.viewBox;
+  if (!viewBox) {
+    return <g />;
+  }
+  const x = viewBox.x + viewBox.width;
+  const y = viewBox.y + viewBox.height + 46;
+  return (
+    <text x={x} y={y} textAnchor="end" fontSize={11} fill="#55677a">
+      z (mm)
+    </text>
+  );
+}
+
+/**
+ * Schematic mirror symbol (a face with angled hatching on its back, the
+ * standard optics-diagram glyph) drawn at the top of a cavity mirror's
+ * reference line, with its label underneath - so a mirror reads as a
+ * physical object on the profile rather than just another dashed line.
+ */
+function renderCavityMirrorLabel(labelText: string, color: string) {
+  return (props: any) => {
+    const viewBox = props?.viewBox;
+    if (!viewBox) {
+      return <g />;
+    }
+    const x = viewBox.x;
+    const faceY = viewBox.y + 2;
+    const halfWidth = 7;
+    const hatchOffsets = [-halfWidth, -halfWidth / 3, halfWidth / 3, halfWidth];
+    return (
+      <g>
+        <line x1={x - halfWidth} y1={faceY} x2={x + halfWidth} y2={faceY} stroke={color} strokeWidth={2.5} strokeLinecap="round" />
+        {hatchOffsets.map((offset, i) => (
+          <line
+            key={i}
+            x1={x + offset}
+            y1={faceY}
+            x2={x + offset - 4}
+            y2={faceY + 8}
+            stroke={color}
+            strokeWidth={1.2}
+          />
+        ))}
+        <text x={x} y={faceY + 22} textAnchor="middle" fontSize={11} fill={color}>
+          {labelText}
+        </text>
+      </g>
+    );
+  };
+}
+
 function formatAxisMax(value: number): string {
   if (!Number.isFinite(value)) {
     return '';
+  }
+  if (value === 0) {
+    return '0';
   }
   if (value >= 100) {
     return value.toFixed(0);
@@ -138,6 +199,20 @@ function formatAxisMax(value: number): string {
     return value.toFixed(1);
   }
   return value.toFixed(2);
+}
+
+// Evenly spaced tick values spanning [min, max], inclusive of both ends -
+// used so the first/last tick always exactly matches the axis domain edge,
+// letting the edge-tick renderers reliably identify (and replace) them.
+function buildAxisTicks(min: number, max: number, count: number): number[] {
+  if (!Number.isFinite(min) || !Number.isFinite(max) || max <= min || count < 2) {
+    return [min, max];
+  }
+  const ticks: number[] = [];
+  for (let i = 0; i < count; i += 1) {
+    ticks.push(min + ((max - min) * i) / (count - 1));
+  }
+  return ticks;
 }
 
 export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
@@ -153,7 +228,9 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
 }) => {
   const frameRef = React.useRef<HTMLDivElement>(null);
   const [draggingLensId, setDraggingLensId] = useState<string | null>(null);
-  const [plotBounds, setPlotBounds] = useState<{ left: number; width: number } | null>(null);
+  const [plotBounds, setPlotBounds] = useState<{ left: number; top: number; width: number; height: number } | null>(
+    null,
+  );
 
   const baseProfile: ProfilePoint[] =
     propagationResult && propagationResult.profile.length > 0
@@ -479,8 +556,10 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
 
   const [lockYAxis, setLockYAxis] = useState(false);
   const [lockedYMaxMm, setLockedYMaxMm] = useState(1);
+  const [lockedYMinMm, setLockedYMinMm] = useState(0);
   const [lockXAxis, setLockXAxis] = useState(false);
   const [lockedXMaxMm, setLockedXMaxMm] = useState(1);
+  const [lockedXMinMm, setLockedXMinMm] = useState(0);
   const [showGouyPhase, setShowGouyPhase] = useState(false);
   const [gouyPhaseWrapped, setGouyPhaseWrapped] = useState(false);
 
@@ -500,11 +579,50 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
   const dataXMaxMm = profileData[profileData.length - 1]?.z ?? 0;
   const effectiveYMaxMm = Math.max(lockYAxis ? lockedYMaxMm : profileMaxMm, 0.001);
   const effectiveXMaxMm = Math.max(lockXAxis ? lockedXMaxMm : dataXMaxMm, 0.001);
+  const effectiveYMinMm = lockYAxis ? lockedYMinMm : 0;
+  const effectiveXMinMm = lockXAxis ? lockedXMinMm : 0;
   const useMicronAxis = effectiveYMaxMm * 1000 <= 3000;
   const axisScale = useMicronAxis ? 1000 : 1;
   const axisUnitLabel = useMicronAxis ? 'um' : 'mm';
-  const roundedYAxisMax = Math.max(1, Math.ceil(effectiveYMaxMm * axisScale));
-  const roundedXAxisMax = Math.max(1, Math.ceil(effectiveXMaxMm));
+  // A locked range comes from the user typing exact bounds - round only the
+  // auto (unlocked) case, so a locked narrow window isn't silently widened
+  // back out to whole-unit boundaries.
+  const roundedYAxisMax = lockYAxis ? effectiveYMaxMm * axisScale : Math.max(1, Math.ceil(effectiveYMaxMm * axisScale));
+  const roundedXAxisMax = lockXAxis ? effectiveXMaxMm : Math.max(1, Math.ceil(effectiveXMaxMm));
+  const roundedYAxisMin = lockYAxis ? effectiveYMinMm * axisScale : 0;
+  const roundedXAxisMin = lockXAxis ? effectiveXMinMm : 0;
+  const xTicks = useMemo(
+    () => buildAxisTicks(roundedXAxisMin, roundedXAxisMax, 5),
+    [roundedXAxisMin, roundedXAxisMax],
+  );
+  const yTicks = useMemo(
+    () => buildAxisTicks(roundedYAxisMin, roundedYAxisMax, 5),
+    [roundedYAxisMin, roundedYAxisMax],
+  );
+
+  const applyXRange = (nextMinMm: number, nextMaxMm: number) => {
+    if (!Number.isFinite(nextMinMm) || !Number.isFinite(nextMaxMm)) {
+      return;
+    }
+    if (nextMinMm < 0 || nextMaxMm <= nextMinMm) {
+      return;
+    }
+    setLockedXMinMm(nextMinMm);
+    setLockedXMaxMm(nextMaxMm);
+    setLockXAxis(true);
+  };
+
+  const applyYRange = (nextMinMm: number, nextMaxMm: number) => {
+    if (!Number.isFinite(nextMinMm) || !Number.isFinite(nextMaxMm)) {
+      return;
+    }
+    if (nextMinMm < 0 || nextMaxMm <= nextMinMm) {
+      return;
+    }
+    setLockedYMinMm(nextMinMm);
+    setLockedYMaxMm(nextMaxMm);
+    setLockYAxis(true);
+  };
   const cavityEigenmodeChartData = useMemo(
     () =>
       cavityEigenmodeSamples.map((sample) => ({
@@ -550,12 +668,14 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
   useEffect(() => {
     if (!lockYAxis) {
       setLockedYMaxMm(profileMaxMm);
+      setLockedYMinMm(0);
     }
   }, [lockYAxis, profileMaxMm]);
 
   useEffect(() => {
     if (!lockXAxis) {
       setLockedXMaxMm(dataXMaxMm);
+      setLockedXMinMm(0);
     }
   }, [lockXAxis, dataXMaxMm]);
 
@@ -577,14 +697,19 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
       }
       const frameRect = frame.getBoundingClientRect();
       const gridRect = gridBg.getBoundingClientRect();
-      setPlotBounds({ left: gridRect.left - frameRect.left, width: gridRect.width });
+      setPlotBounds({
+        left: gridRect.left - frameRect.left,
+        top: gridRect.top - frameRect.top,
+        width: gridRect.width,
+        height: gridRect.height,
+      });
     };
 
     measure();
     const observer = new ResizeObserver(measure);
     observer.observe(frame);
     return () => observer.disconnect();
-  }, [roundedXAxisMax, roundedYAxisMax, axisUnitLabel]);
+  }, [roundedXAxisMin, roundedXAxisMax, roundedYAxisMin, roundedYAxisMax, axisUnitLabel]);
 
   const hoveredPoint = hoveredZMm !== null ? nearestProfilePoint(profileData, hoveredZMm) : null;
   const hoveredPointAxisY = hoveredPoint ? hoveredPoint.w * axisScale : null;
@@ -598,102 +723,74 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
     return <div className="profile-placeholder">No beam profile data available.</div>;
   }
 
+  // The edge ticks (domain min/max) are hidden here and instead rendered as
+  // the editable axis-edge fields overlaid on the frame below, positioned
+  // from the measured plot pixel bounds.
+  const isEdgeTickValue = (value: number, min: number, max: number) =>
+    Math.abs(value - min) < 1e-9 || Math.abs(value - max) < 1e-9;
+
+  const renderXAxisTick = (props: any) => {
+    const { x, y, payload } = props;
+    if (isEdgeTickValue(payload.value, roundedXAxisMin, roundedXAxisMax)) {
+      return <g />;
+    }
+    return (
+      <text x={x} y={y + 12} textAnchor="middle" fontSize={11} fill="#55677a">
+        {formatAxisMax(payload.value)}
+      </text>
+    );
+  };
+
+  const renderYAxisTick = (props: any) => {
+    const { x, y, payload } = props;
+    if (isEdgeTickValue(payload.value, roundedYAxisMin, roundedYAxisMax)) {
+      return <g />;
+    }
+    return (
+      <text x={x} y={y + 4} textAnchor="end" fontSize={11} fill="#55677a">
+        {formatAxisMax(payload.value)}
+      </text>
+    );
+  };
+
   return (
     <div className="profile-chart-shell">
       <div className="profile-chart-toolbar">
-        <div className="profile-axis-control">
-          <button
-            type="button"
-            className="icon-button"
-            aria-label={lockXAxis ? 'Unlock X axis range' : 'Lock X axis range'}
-            onClick={() => setLockXAxis((locked) => !locked)}
-          >
-            <img className="icon-glyph" src={lockXAxis ? lockIcon : lockOpenIcon} alt="" />
-          </button>
-          <label className="profile-axis-max-field">
-            <span>X max (mm)</span>
-            <input
-              type="text"
-              inputMode="decimal"
-              className="profile-axis-max-input"
-              value={formatAxisMax(effectiveXMaxMm)}
-              onChange={(event) => {
-                const value = Number(event.target.value);
-                if (Number.isFinite(value) && value > 0) {
-                  setLockedXMaxMm(value);
-                  setLockXAxis(true);
-                }
-              }}
-              onKeyDown={(event) =>
-                handleCaretStepKeyDown(event, (value) => {
-                  if (value > 0) {
-                    setLockedXMaxMm(value);
-                    setLockXAxis(true);
-                  }
-                })
-              }
-            />
-          </label>
-        </div>
-        <div className="profile-axis-control">
-          <button
-            type="button"
-            className="icon-button"
-            aria-label={lockYAxis ? 'Unlock Y axis range' : 'Lock Y axis range'}
-            onClick={() => setLockYAxis((locked) => !locked)}
-          >
-            <img className="icon-glyph" src={lockYAxis ? lockIcon : lockOpenIcon} alt="" />
-          </button>
-          <label className="profile-axis-max-field">
-            <span>Y max ({axisUnitLabel})</span>
-            <input
-              type="text"
-              inputMode="decimal"
-              className="profile-axis-max-input"
-              value={formatAxisMax(effectiveYMaxMm * axisScale)}
-              onChange={(event) => {
-                const value = Number(event.target.value);
-                if (Number.isFinite(value) && value > 0) {
-                  setLockedYMaxMm(value / axisScale);
-                  setLockYAxis(true);
-                }
-              }}
-              onKeyDown={(event) =>
-                handleCaretStepKeyDown(event, (value) => {
-                  if (value > 0) {
-                    setLockedYMaxMm(value / axisScale);
-                    setLockYAxis(true);
-                  }
-                })
-              }
-            />
-          </label>
-        </div>
-        <label className="profile-gouy-toggle">
-          <input
-            type="checkbox"
-            checked={showGouyPhase}
-            onChange={(event) => setShowGouyPhase(event.target.checked)}
-          />
-          Gouy phase
-        </label>
-        {showGouyPhase && (
+        {liveOverlap !== null ? (
+          <div className="profile-overlap-chip">
+            <strong>Overlap</strong>
+            <span>{(liveOverlap * 100).toFixed(1)}%</span>
+          </div>
+        ) : (
+          <span />
+        )}
+        <div className="profile-chart-toolbar-toggles">
           <label className="profile-gouy-toggle">
             <input
               type="checkbox"
-              checked={gouyPhaseWrapped}
-              onChange={(event) => setGouyPhaseWrapped(event.target.checked)}
+              checked={showGouyPhase}
+              onChange={(event) => setShowGouyPhase(event.target.checked)}
             />
-            Wrap phase
+            Gouy phase
           </label>
-        )}
+          {showGouyPhase && (
+            <label className="profile-gouy-toggle">
+              <input
+                type="checkbox"
+                checked={gouyPhaseWrapped}
+                onChange={(event) => setGouyPhaseWrapped(event.target.checked)}
+              />
+              Wrap phase
+            </label>
+          )}
+        </div>
       </div>
       <div className="profile-chart-frame" ref={frameRef}>
-        <div style={{ width: '100%', height: 240 }}>
+        <div style={{ width: '100%', height: '100%' }}>
           <ResponsiveContainer>
             <ComposedChart
               data={chartData}
-              margin={{ top: 22, right: 16, bottom: 8, left: 8 }}
+              margin={{ top: 26, right: 16, bottom: 56, left: 54 }}
               onMouseMove={(state: any) => {
                 const z = typeof state?.activeLabel === 'number' ? state.activeLabel : null;
                 onHoverZMm(z);
@@ -746,17 +843,19 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
               <XAxis
                 dataKey="z"
                 type="number"
-                domain={[0, roundedXAxisMax]}
+                domain={[roundedXAxisMin, roundedXAxisMax]}
+                ticks={xTicks}
                 allowDataOverflow
-                tick={{ fontSize: 11, fill: '#55677a' }}
-                label={{ value: 'z (mm)', position: 'insideBottomRight', offset: -5, fill: '#55677a' }}
+                tick={renderXAxisTick}
+                label={renderXAxisLabel}
               />
               <YAxis
                 dataKey="wAxis"
                 type="number"
-                domain={[0, roundedYAxisMax]}
+                domain={[roundedYAxisMin, roundedYAxisMax]}
+                ticks={yTicks}
                 allowDataOverflow
-                tick={{ fontSize: 11, fill: '#55677a' }}
+                tick={renderYAxisTick}
                 label={{ value: `w (${axisUnitLabel})`, angle: -90, position: 'insideLeft', fill: '#55677a' }}
               />
               <Line
@@ -826,20 +925,30 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
                 />
               ))}
 
-              {cavityMarkers.map((marker, index) => (
-                <ReferenceLine
-                  key={`cavity-${index}`}
-                  x={marker.z}
-                  stroke={marker.kind === 'waist' ? '#2d9bf0' : '#9013fe'}
-                  strokeDasharray={marker.kind === 'waist' ? '2 3' : '4 4'}
-                  label={{
-                    value: marker.label,
-                    position: marker.kind === 'waist' ? 'insideBottom' : 'insideTop',
-                    fill: marker.kind === 'waist' ? '#2d9bf0' : '#6b1fc9',
-                    fontSize: 11,
-                  }}
-                />
-              ))}
+              {cavityMarkers.map((marker, index) =>
+                marker.kind === 'mirror' ? (
+                  <ReferenceLine
+                    key={`cavity-${index}`}
+                    x={marker.z}
+                    stroke="#9013fe"
+                    strokeDasharray="4 4"
+                    label={renderCavityMirrorLabel(marker.label, '#6b1fc9')}
+                  />
+                ) : (
+                  <ReferenceLine
+                    key={`cavity-${index}`}
+                    x={marker.z}
+                    stroke="#2d9bf0"
+                    strokeDasharray="2 3"
+                    label={{
+                      value: marker.label,
+                      position: 'insideBottom',
+                      fill: '#2d9bf0',
+                      fontSize: 11,
+                    }}
+                  />
+                ),
+              )}
 
               {cavityOverlapMarkers.map((marker, index) => (
                 <ReferenceLine
@@ -905,15 +1014,20 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
             // (see the useLayoutEffect above), not the frame's full width -
             // recharts insets the plot by the Y axis label width, so a
             // percent-of-frame position drifts left of the actual line.
-            const zMax = roundedXAxisMax;
-            const positionRatio = zMax > 0 ? Math.max(0, Math.min(1, marker.z / zMax)) : 0;
+            const zSpan = roundedXAxisMax - roundedXAxisMin;
+            const positionRatio =
+              zSpan > 0 ? Math.max(0, Math.min(1, (marker.z - roundedXAxisMin) / zSpan)) : 0;
             const leftPx = plotBounds.left + positionRatio * plotBounds.width;
+            // Anchored to the measured axis line itself (not a fixed offset
+            // from the frame's bottom edge), so it stays put regardless of
+            // how much vertical room the chart ends up with.
+            const topPx = plotBounds.top + plotBounds.height;
             return (
               <button
                 key={marker.id}
                 type="button"
                 className={`profile-lens-marker${draggingLensId === marker.id ? ' dragging' : ''}`}
-                style={{ left: `${leftPx}px` }}
+                style={{ left: `${leftPx}px`, top: `${topPx}px` }}
                 title={`Drag ${marker.label} along path`}
                 onPointerDown={(event) => {
                   const frame = frameRef.current;
@@ -935,7 +1049,7 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
                       0,
                       Math.min(1, (clientX - frameRect.left - bounds.left) / bounds.width),
                     );
-                    onMoveLensAlongPath(marker.id, dragRatio * roundedXAxisMax);
+                    onMoveLensAlongPath(marker.id, roundedXAxisMin + dragRatio * (roundedXAxisMax - roundedXAxisMin));
                   };
 
                   updateFromClientX(event.clientX);
@@ -968,11 +1082,92 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
           </div>
         )}
 
-        {liveOverlap !== null && (
-          <div className="profile-overlap-chip">
-            <strong>Overlap</strong>
-            <span>{(liveOverlap * 100).toFixed(1)}%</span>
-          </div>
+        {plotBounds && (
+          <>
+            <div
+              className="profile-axis-edge-field profile-axis-edge-field--x-min"
+              style={{ left: `${plotBounds.left}px`, top: `${plotBounds.top + plotBounds.height}px` }}
+            >
+              <input
+                type="text"
+                inputMode="decimal"
+                aria-label="X axis minimum (mm)"
+                className="profile-axis-edge-input"
+                value={formatAxisMax(effectiveXMinMm)}
+                onChange={(event) => applyXRange(Number(event.target.value), effectiveXMaxMm)}
+                onKeyDown={(event) =>
+                  handleCaretStepKeyDown(event, (value) => applyXRange(value, effectiveXMaxMm))
+                }
+              />
+            </div>
+            <div
+              className="profile-axis-edge-field profile-axis-edge-field--x-max"
+              style={{
+                left: `${plotBounds.left + plotBounds.width}px`,
+                top: `${plotBounds.top + plotBounds.height}px`,
+              }}
+            >
+              <input
+                type="text"
+                inputMode="decimal"
+                aria-label="X axis maximum (mm)"
+                className="profile-axis-edge-input"
+                value={formatAxisMax(effectiveXMaxMm)}
+                onChange={(event) => applyXRange(effectiveXMinMm, Number(event.target.value))}
+                onKeyDown={(event) =>
+                  handleCaretStepKeyDown(event, (value) => applyXRange(effectiveXMinMm, value))
+                }
+              />
+              <button
+                type="button"
+                className="icon-button profile-axis-edge-lock"
+                aria-label={lockXAxis ? 'Unlock X axis range' : 'Lock X axis range'}
+                onClick={() => setLockXAxis((locked) => !locked)}
+              >
+                <img className="icon-glyph" src={lockXAxis ? lockIcon : lockOpenIcon} alt="" />
+              </button>
+            </div>
+            <div
+              className="profile-axis-edge-field profile-axis-edge-field--y-min"
+              style={{ left: `${plotBounds.left}px`, top: `${plotBounds.top + plotBounds.height}px` }}
+            >
+              <input
+                type="text"
+                inputMode="decimal"
+                aria-label={`Y axis minimum (${axisUnitLabel})`}
+                className="profile-axis-edge-input"
+                value={formatAxisMax(effectiveYMinMm * axisScale)}
+                onChange={(event) => applyYRange(Number(event.target.value) / axisScale, effectiveYMaxMm)}
+                onKeyDown={(event) =>
+                  handleCaretStepKeyDown(event, (value) => applyYRange(value / axisScale, effectiveYMaxMm))
+                }
+              />
+            </div>
+            <div
+              className="profile-axis-edge-field profile-axis-edge-field--y-max"
+              style={{ left: `${plotBounds.left}px`, top: `${plotBounds.top}px` }}
+            >
+              <button
+                type="button"
+                className="icon-button profile-axis-edge-lock"
+                aria-label={lockYAxis ? 'Unlock Y axis range' : 'Lock Y axis range'}
+                onClick={() => setLockYAxis((locked) => !locked)}
+              >
+                <img className="icon-glyph" src={lockYAxis ? lockIcon : lockOpenIcon} alt="" />
+              </button>
+              <input
+                type="text"
+                inputMode="decimal"
+                aria-label={`Y axis maximum (${axisUnitLabel})`}
+                className="profile-axis-edge-input"
+                value={formatAxisMax(effectiveYMaxMm * axisScale)}
+                onChange={(event) => applyYRange(effectiveYMinMm, Number(event.target.value) / axisScale)}
+                onKeyDown={(event) =>
+                  handleCaretStepKeyDown(event, (value) => applyYRange(effectiveYMinMm, value / axisScale))
+                }
+              />
+            </div>
+          </>
         )}
       </div>
     </div>
