@@ -1,7 +1,7 @@
 import { lazy, Suspense } from 'react';
 import { useAppStore } from '../adapters/useAppStore';
 import { computeLiveModeOverlap, moveComponentToPathZ } from '../state';
-import helpIcon from '../../../icons/circle-question-mark.svg';
+import { HelpPopout } from '../../ui/shared/HelpPopout';
 
 const BeamProfileChart = lazy(() => import('../../ui/profile/BeamProfileChart').then((module) => ({
   default: module.BeamProfileChart,
@@ -41,15 +41,10 @@ export function ProfilePane({ hoveredZMm, onHoverZMm }: ProfilePaneProps) {
       <header className="panel-header">
         <div className="profile-header-title">
           <h2 id="profile-title">Unfolded Beam Profile</h2>
-          <details className="help-popout profile-help-popout">
-            <summary aria-label="Profile info">
-              <img className="icon-glyph" src={helpIcon} alt="" />
-            </summary>
-            <div>
-              Drag lens or target markers directly on the 1D profile to slide them along the unfolded
-              beam path. The propagation and overlap readout update live during dragging.
-            </div>
-          </details>
+          <HelpPopout className="profile-help-popout" summaryAriaLabel="Profile info">
+            Drag lens or target markers directly on the 1D profile to slide them along the unfolded
+            beam path. The propagation and overlap readout update live during dragging.
+          </HelpPopout>
         </div>
       </header>
       <div className="panel-body profile-panel-body">

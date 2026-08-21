@@ -40,6 +40,12 @@ import eyeOffIcon from '../../../icons/eye-off.svg';
 import rotateCcwIcon from '../../../icons/rotate-ccw.svg';
 import rotateCwIcon from '../../../icons/rotate-cw.svg';
 import trashIcon from '../../../icons/trash-2.svg';
+import zoomInIcon from '../../../icons/zoom-in.svg';
+import zoomOutIcon from '../../../icons/zoom-out.svg';
+import fullscreenIcon from '../../../icons/fullscreen.svg';
+
+const MIN_ZOOM = 0.25;
+const MAX_ZOOM = 6;
 
 interface CanvasProps {
   config: TableConfig;
@@ -67,6 +73,11 @@ export const Canvas: React.FC<CanvasProps> = ({
   const { state, dispatch } = useAppStore();
   const [viewportSize, setViewportSize] = React.useState({ width: 960, height: 420 });
   const [showStability, setShowStability] = React.useState(false);
+  // Camera transform for zoom/pan: an additional scale+offset layered on top
+  // of tableScale's fit-to-viewport sizing, applied to the Stage itself
+  // rather than baked into mmToPx, so component geometry math stays simple.
+  const [view, setView] = React.useState({ x: 0, y: 0, scale: 1 });
+  const [isPanning, setIsPanning] = React.useState(false);
   const source = sourceId ? components[sourceId] : null;
   const sourceComponent = source && source.kind === 'source' ? (source as SourceComponent) : null;
   const selected = state.selectedComponentId ? state.components[state.selectedComponentId] : null;
@@ -120,6 +131,95 @@ export const Canvas: React.FC<CanvasProps> = ({
   const tableScale = Math.min(usableWidth / config.width, usableHeight / config.height, 1.45);
 
   const mmToPx = React.useCallback((mm: number) => mm * tableScale, [tableScale]);
+
+  // Converts between "content space" (the tablePadding + mmToPx pixel space
+  // every renderer already works in) and "screen space" (actual pixels
+  // within the viewport, after the Stage's own pan/zoom transform).
+  const toScreenPx = React.useCallback(
+    (contentPx: Point2d): Point2d => ({
+      x: view.x + contentPx.x * view.scale,
+      y: view.y + contentPx.y * view.scale,
+    }),
+    [view]
+  );
+
+  const toContentPx = React.useCallback(
+    (screenPx: Point2d): Point2d => ({
+      x: (screenPx.x - view.x) / view.scale,
+      y: (screenPx.y - view.y) / view.scale,
+    }),
+    [view]
+  );
+
+  const zoomAround = React.useCallback((anchorScreenPx: Point2d, factor: number) => {
+    setView((prev) => {
+      const anchorContentX = (anchorScreenPx.x - prev.x) / prev.scale;
+      const anchorContentY = (anchorScreenPx.y - prev.y) / prev.scale;
+      const nextScale = Math.max(MIN_ZOOM, Math.min(MAX_ZOOM, prev.scale * factor));
+      return {
+        scale: nextScale,
+        x: anchorScreenPx.x - anchorContentX * nextScale,
+        y: anchorScreenPx.y - anchorContentY * nextScale,
+      };
+    });
+  }, []);
+
+  const resetView = React.useCallback(() => setView({ x: 0, y: 0, scale: 1 }), []);
+
+  const handleWheel = (event: Konva.KonvaEventObject<WheelEvent>) => {
+    event.evt.preventDefault();
+    const stage = stageRef.current;
+    const pointer = stage?.getPointerPosition();
+    if (!pointer) {
+      return;
+    }
+
+    if (event.evt.ctrlKey || event.evt.metaKey) {
+      // Pinch-zoom gesture (reported by browsers as ctrl+wheel) or explicit
+      // ctrl/cmd+scroll: zoom centered on the pointer.
+      const zoomFactor = Math.exp(-event.evt.deltaY * 0.0025);
+      zoomAround(pointer, zoomFactor);
+    } else {
+      // Plain wheel/two-finger scroll: pan.
+      setView((prev) => ({ ...prev, x: prev.x - event.evt.deltaX, y: prev.y - event.evt.deltaY }));
+    }
+  };
+
+  const handleStageMouseDown = (event: Konva.KonvaEventObject<MouseEvent>) => {
+    const stage = stageRef.current;
+    if (!stage || event.target !== stage) {
+      return;
+    }
+
+    const startClientX = event.evt.clientX;
+    const startClientY = event.evt.clientY;
+    const startView = view;
+    let didPan = false;
+
+    const handleWindowMouseMove = (moveEvent: MouseEvent) => {
+      const dx = moveEvent.clientX - startClientX;
+      const dy = moveEvent.clientY - startClientY;
+      if (!didPan && (Math.abs(dx) > 3 || Math.abs(dy) > 3)) {
+        didPan = true;
+        setIsPanning(true);
+      }
+      if (didPan) {
+        setView({ x: startView.x + dx, y: startView.y + dy, scale: startView.scale });
+      }
+    };
+
+    const handleWindowMouseUp = () => {
+      window.removeEventListener('mousemove', handleWindowMouseMove);
+      window.removeEventListener('mouseup', handleWindowMouseUp);
+      setIsPanning(false);
+      if (!didPan) {
+        dispatch({ type: 'SET_SELECTED_COMPONENT', payload: { componentId: null } });
+      }
+    };
+
+    window.addEventListener('mousemove', handleWindowMouseMove);
+    window.addEventListener('mouseup', handleWindowMouseUp);
+  };
 
   const clampToTableCenter = React.useCallback(
     (point: Point2d): Point2d => ({
@@ -256,19 +356,23 @@ export const Canvas: React.FC<CanvasProps> = ({
 
   const getSnappedDragPositionPx = React.useCallback(
     (component: OpticalComponent, rawPx: Point2d): Point2d => {
+      // dragBoundFunc receives/returns absolute (screen) pixels, which no
+      // longer match content pixels once the Stage has its own pan/zoom.
+      const contentPx = toContentPx(rawPx);
       const widthPx = viewportSize.width - tablePadding * 2;
       const heightPx = viewportSize.height - tablePadding * 2;
       const pointMm = {
-        x: (rawPx.x - tablePadding) / tableScale,
-        y: (rawPx.y - tablePadding) / tableScale,
+        x: (contentPx.x - tablePadding) / tableScale,
+        y: (contentPx.y - tablePadding) / tableScale,
       };
       const normalized = normalizePosition(component, pointMm).position;
-      return {
+      const clampedContentPx = {
         x: Math.max(tablePadding, Math.min(tablePadding + widthPx, tablePadding + mmToPx(normalized.x))),
         y: Math.max(tablePadding, Math.min(tablePadding + heightPx, tablePadding + mmToPx(normalized.y))),
       };
+      return toScreenPx(clampedContentPx);
     },
-    [mmToPx, normalizePosition, tablePadding, tableScale, viewportSize.height, viewportSize.width]
+    [mmToPx, normalizePosition, tablePadding, tableScale, toContentPx, toScreenPx, viewportSize.height, viewportSize.width]
   );
 
   const selectComponent = (componentId: string) => {
@@ -361,10 +465,10 @@ export const Canvas: React.FC<CanvasProps> = ({
 
   const selectedOverlayPos = selected
     ? getSelectionPopoverPosition({
-        componentPx: {
+        componentPx: toScreenPx({
           x: tablePadding + mmToPx(selected.position.x),
           y: tablePadding + mmToPx(selected.position.y),
-        },
+        }),
         viewportSize,
         cardWidth: stabilityPanelOpen ? selectionCardWidthWithStability : selectionCardWidth,
         cardHeight: getSelectionCardHeight(selected.kind) + (stabilityPanelOpen ? 120 : 0),
@@ -378,14 +482,16 @@ export const Canvas: React.FC<CanvasProps> = ({
         ref={stageRef}
         width={viewportSize.width}
         height={viewportSize.height}
+        x={view.x}
+        y={view.y}
+        scaleX={view.scale}
+        scaleY={view.scale}
         style={{
           backgroundColor: '#3b4249',
+          cursor: isPanning ? 'grabbing' : 'default',
         }}
-        onMouseDown={(event) => {
-          if (event.target === event.target.getStage()) {
-            dispatch({ type: 'SET_SELECTED_COMPONENT', payload: { componentId: null } });
-          }
-        }}
+        onWheel={handleWheel}
+        onMouseDown={handleStageMouseDown}
         onMouseMove={() => {
           const stage = stageRef.current;
           if (!stage || !beamPath || !beamPath.isValid) {
@@ -397,9 +503,10 @@ export const Canvas: React.FC<CanvasProps> = ({
             return;
           }
 
+          const contentPx = toContentPx(pointer);
           const pointMm = {
-            x: (pointer.x - tablePadding) / tableScale,
-            y: (pointer.y - tablePadding) / tableScale,
+            x: (contentPx.x - tablePadding) / tableScale,
+            y: (contentPx.y - tablePadding) / tableScale,
           };
 
           if (
@@ -533,6 +640,19 @@ export const Canvas: React.FC<CanvasProps> = ({
           </Group>
         </Layer>
       </Stage>
+
+      <div className="canvas-zoom-controls">
+        <button type="button" className="icon-button" aria-label="Zoom out" onClick={() => zoomAround({ x: viewportSize.width / 2, y: viewportSize.height / 2 }, 1 / 1.25)}>
+          <img className="icon-glyph" src={zoomOutIcon} alt="" />
+        </button>
+        <span className="canvas-zoom-readout">{Math.round(view.scale * 100)}%</span>
+        <button type="button" className="icon-button" aria-label="Zoom in" onClick={() => zoomAround({ x: viewportSize.width / 2, y: viewportSize.height / 2 }, 1.25)}>
+          <img className="icon-glyph" src={zoomInIcon} alt="" />
+        </button>
+        <button type="button" className="icon-button" aria-label="Reset view" title="Reset view" onClick={resetView}>
+          <img className="icon-glyph" src={fullscreenIcon} alt="" />
+        </button>
+      </div>
 
       {selected && selectedOverlayPos && (
         <div

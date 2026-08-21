@@ -22,11 +22,12 @@ import {
 import { snapPointToGrid } from '../state/snapToGrid';
 import { GAUSSIAN_FILE_EXTENSION, parseAppState, serializeAppState } from '../state/fileFormat';
 import { NumericField } from '../../ui/shared/NumericField';
+import { HelpPopout } from '../../ui/shared/HelpPopout';
 import { SettingsModal } from './SettingsModal';
+import { useTheme } from '../adapters/useTheme';
 import chevronDownIcon from '../../../icons/circle-chevron-down.svg';
 import chevronUpIcon from '../../../icons/circle-chevron-up.svg';
 import circlePlusIcon from '../../../icons/circle-plus.svg';
-import helpIcon from '../../../icons/circle-question-mark.svg';
 import trashIcon from '../../../icons/trash-2.svg';
 import warningIcon from '../../../icons/triangle-alert.svg';
 
@@ -74,6 +75,7 @@ function downloadTextFile(filename: string, content: string) {
 
 export function Sidebar() {
   const { state, dispatch, runSolver, applySolution, resetTable } = useAppStore();
+  const { theme, toggleTheme } = useTheme();
   const [modeMatchingOpen, setModeMatchingOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -298,17 +300,20 @@ export function Sidebar() {
             >
               <img className="icon-glyph" src={trashIcon} alt="" />
             </button>
-            <details className="help-popout">
-              <summary aria-label="Open help">
-                <img className="icon-glyph" src={helpIcon} alt="" />
-              </summary>
-              <div>
-                Save writes the whole table layout to a plain-text .gaussian file. Load replaces
-                everything currently on the table with what's in the chosen file. Clear (trash
-                icon) resets the table to a blank default after confirmation. The table layout is
-                also autosaved locally, so a refresh or reopening the tab won't lose your work.
-              </div>
-            </details>
+            <label className="theme-toggle-group" title="Toggle dark mode">
+              <span className="switch">
+                <input
+                  type="checkbox"
+                  checked={theme === 'dark'}
+                  onChange={toggleTheme}
+                  aria-label="Toggle dark mode"
+                />
+                <span className="switch-track">
+                  <span className="switch-thumb" />
+                </span>
+              </span>
+              <span className="theme-toggle-label">Dark Mode</span>
+            </label>
           </div>
           <input
             ref={fileInputRef}
@@ -325,14 +330,9 @@ export function Sidebar() {
           <div>
             <h3>Beam Path Components</h3>
           </div>
-          <details className="help-popout">
-            <summary aria-label="Open help">
-              <img className="icon-glyph" src={helpIcon} alt="" />
-            </summary>
-            <div>
-              Select a row to focus the same component on the canvas. Edit values inline.
-            </div>
-          </details>
+          <HelpPopout summaryAriaLabel="Open help">
+            Select a row to focus the same component on the canvas. Edit values inline.
+          </HelpPopout>
         </header>
         <div className="panel-body component-table-panel">
           <div className="component-toolbar">
