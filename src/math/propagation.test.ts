@@ -308,6 +308,79 @@ describe('Propagation Engine', () => {
       expect(withInertObject.qFinal.re).toBeCloseTo(baseline.qFinal.re, 9);
       expect(withInertObject.qFinal.im).toBeCloseTo(baseline.qFinal.im, 9);
     });
+
+    it('is continuous across both faces and diverges more slowly inside the slab (n > 1)', () => {
+      // w(z) for a Gaussian beam, using the local index of refraction the
+      // same way propagateBeam's beamRadiusFromQ does.
+      const wFromQ = (reMm: number, imMm: number, refractiveIndex: number) => {
+        const reM = reMm / 1000;
+        const imM = imMm / 1000;
+        const denom = reM * reM + imM * imM;
+        const invQIm = -imM / denom;
+        const wSqM = -WAVELENGTH_M / (Math.PI * invQIm * refractiveIndex);
+        return Math.sqrt(wSqM) * 1000;
+      };
+
+      const waist_mm = 0.05;
+      const zRMm = rayleighRange(waist_mm / 1000, WAVELENGTH_M) * 1000;
+      const q0 = { re: 0, im: zRMm }; // waist at the source
+      const entryZMm = 50;
+      const thicknessMm = 20;
+      const n = 1.5;
+      const tailMm = 80;
+
+      const input: PropagationEngineInput = {
+        q0,
+        wavelengthMetres: WAVELENGTH_M,
+        segments: [
+          {
+            distance: entryZMm,
+            abcdMatrix: { A: 1, B: entryZMm, C: 0, D: 1 },
+            componentId: 'OBJ1',
+            componentKind: 'custom_object',
+            customObjectIndexOfRefraction: n,
+            customObjectThicknessMm: thicknessMm,
+          },
+          {
+            distance: thicknessMm + tailMm,
+            abcdMatrix: { A: 1, B: thicknessMm + tailMm, C: 0, D: 1 },
+            componentId: null,
+          },
+        ],
+        componentZMap: { OBJ1: entryZMm },
+      };
+
+      const result = engine.propagateBeam(input);
+      const exitZMm = entryZMm + thicknessMm;
+
+      const atEntry = result.profile.filter((p) => Math.abs(p.z - entryZMm) < 1e-6);
+      const atExit = result.profile.filter((p) => Math.abs(p.z - exitZMm) < 1e-6);
+      // Both faces should be sampled from each side (the segment ending
+      // there, and the medium/remainder stretch starting there).
+      expect(atEntry.length).toBe(2);
+      expect(atExit.length).toBe(2);
+
+      // No discontinuity: entering/leaving a flat interface changes the
+      // wavefront curvature, not the beam's physical size.
+      expect(atEntry[0].w).toBeCloseTo(atEntry[1].w, 6);
+      expect(atExit[0].w).toBeCloseTo(atExit[1].w, 6);
+
+      // The analytic q just after the exit face (entry refraction * n,
+      // ordinary translation across the real thickness, exit refraction / n)
+      // should match what the engine reports there.
+      const qAfterEntry = { re: entryZMm * n, im: zRMm * n };
+      const qBeforeExit = { re: qAfterEntry.re + thicknessMm, im: qAfterEntry.im };
+      const qAfterExit = { re: qBeforeExit.re / n, im: qBeforeExit.im / n };
+      expect(atExit[1].w).toBeCloseTo(wFromQ(qAfterExit.re, qAfterExit.im, 1), 6);
+
+      // Inside the slab the beam should be measurably narrower at the exit
+      // face than naively continuing the pre-slab (vacuum-rate) divergence
+      // for the same physical distance would predict - i.e. the divergence
+      // angle truly changes inside the medium instead of carrying on
+      // unaffected.
+      const naiveVacuumContinuation = wFromQ(entryZMm + thicknessMm, zRMm, 1);
+      expect(atExit[1].w).toBeLessThan(naiveVacuumContinuation);
+    });
   });
 
   describe('Gouy phase', () => {

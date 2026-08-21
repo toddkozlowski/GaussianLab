@@ -18,6 +18,22 @@ describe('appStateReducer', () => {
   });
 
   it('removes a component from the state', () => {
+    const lens = createLensThinComponent();
+    const state = {
+      ...DEFAULT_APP_STATE,
+      components: { [lens.id]: lens },
+    };
+
+    const action: AppAction = {
+      type: 'REMOVE_COMPONENT',
+      payload: { id: lens.id },
+    };
+
+    const newState = appStateReducer(state, action);
+    expect(newState.components[lens.id]).toBeUndefined();
+  });
+
+  it('does not remove the source component - only one source is supported at a time', () => {
     const source = createSourceComponent();
     const state = {
       ...DEFAULT_APP_STATE,
@@ -31,8 +47,8 @@ describe('appStateReducer', () => {
     };
 
     const newState = appStateReducer(state, action);
-    expect(newState.components[source.id]).toBeUndefined();
-    expect(newState.sourceId).toBeNull(); // Cleared because source was removed
+    expect(newState.components[source.id]).toEqual(source);
+    expect(newState.sourceId).toBe(source.id);
   });
 
   it('removes a non-source component without clearing sourceId', () => {

@@ -14,6 +14,8 @@ import { Rect, Text, Line, Group } from 'react-konva';
 import type Konva from 'konva';
 import type { CavityEigenmode, CavityFPComponent, Point2d } from '../../../app/state/schema';
 import { beamRadiusAtZ, rayleighRange } from '../../../math/qParameter';
+import { useTheme } from '../../../app/adapters/useTheme';
+import { getCanvasColors } from '../canvasTheme';
 
 interface CavityRendererProps {
   component: CavityFPComponent;
@@ -112,6 +114,8 @@ const MirrorFace: React.FC<MirrorFaceProps> = ({
   isSelected,
   fillColor,
 }) => {
+  const { theme } = useTheme();
+  const colors = getCanvasColors(theme);
   const bow = isConcave(radiusMm) ? outwardSign * CONCAVE_BOW_PX : 0;
   const substrateRectStart = outwardSign > 0 ? axisPos : axisPos - thickness;
 
@@ -127,7 +131,7 @@ const MirrorFace: React.FC<MirrorFaceProps> = ({
         width={isHorizontal ? thickness : span}
         height={isHorizontal ? span : thickness}
         fill="#c2c9d1"
-        stroke={isSelected ? '#1f6feb' : '#5b6b7a'}
+        stroke={isSelected ? '#1f6feb' : colors.neutralLine}
         strokeWidth={isSelected ? 2 : 1.5}
       />
       <Line
@@ -153,6 +157,8 @@ export const CavityRenderer: React.FC<CavityRendererProps> = ({
   wavelengthNm,
 }) => {
   const groupRef = useRef<Konva.Group>(null);
+  const { theme } = useTheme();
+  const colors = getCanvasColors(theme);
 
   // component.position anchors the input mirror (M1), not the cavity center.
   // The output mirror (M2) sits `length` further downstream, in `direction`.
@@ -240,7 +246,7 @@ export const CavityRenderer: React.FC<CavityRendererProps> = ({
 
       <Line
         points={isHorizontal ? [0, 0, m2OffsetPx, 0] : [0, 0, 0, m2OffsetPx]}
-        stroke="#999"
+        stroke={colors.neutralLineFaint}
         strokeWidth={1}
       />
 
@@ -262,7 +268,7 @@ export const CavityRenderer: React.FC<CavityRendererProps> = ({
         y={isHorizontal ? -mirrorSpan / 2 - 16 : -substrateThickness / 2 - 8}
         text={component.label}
         fontSize={12}
-        fill="#333"
+        fill={colors.label}
         pointerEvents="none"
       />
 
@@ -272,7 +278,7 @@ export const CavityRenderer: React.FC<CavityRendererProps> = ({
         y={isHorizontal ? -mirrorSpan / 2 - 2 : m2OffsetPx / 2 - 6}
         text={`L=${Math.round(component.length)}mm`}
         fontSize={10}
-        fill="#666"
+        fill={colors.labelSecondary}
         pointerEvents="none"
       />
     </Group>

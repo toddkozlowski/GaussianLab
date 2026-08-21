@@ -18,7 +18,7 @@ import type {
   SourceComponent,
   TargetMode,
 } from '../../app/state/schema';
-import { handleCaretStepKeyDown } from '../shared/numericCaretStep';
+import { NumericField } from '../shared/NumericField';
 import lockIcon from '../../../icons/lock.svg';
 import lockOpenIcon from '../../../icons/lock-open.svg';
 
@@ -31,7 +31,7 @@ interface BeamProfileChartProps {
   hoveredZMm: number | null;
   onHoverZMm: (zMm: number | null) => void;
   liveOverlap: number | null;
-  onMoveLensAlongPath: (lensId: string, zMm: number) => void;
+  onMoveComponentAlongPath: (componentId: string, zMm: number) => void;
 }
 
 interface ProfilePoint {
@@ -48,8 +48,6 @@ interface ModeProjection {
   z0Mm: number;
   isSelected: boolean;
 }
-
-const EIGENMODE_AREA_SAMPLES = 24;
 
 function buildFallbackProfile(source: SourceComponent | null, beamPath: BeamPath | null): ProfilePoint[] {
   if (!beamPath || beamPath.segments.length === 0) {
@@ -141,7 +139,7 @@ function renderXAxisLabel(props: any) {
   const x = viewBox.x + viewBox.width;
   const y = viewBox.y + viewBox.height + 46;
   return (
-    <text x={x} y={y} textAnchor="end" fontSize={11} fill="#55677a">
+    <text x={x} y={y} textAnchor="end" fontSize={11} fill="var(--chart-axis-text)">
       z (mm)
     </text>
   );
@@ -224,10 +222,10 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
   hoveredZMm,
   onHoverZMm,
   liveOverlap,
-  onMoveLensAlongPath,
+  onMoveComponentAlongPath,
 }) => {
   const frameRef = React.useRef<HTMLDivElement>(null);
-  const [draggingLensId, setDraggingLensId] = useState<string | null>(null);
+  const [draggingComponentId, setDraggingComponentId] = useState<string | null>(null);
   const [plotBounds, setPlotBounds] = useState<{ left: number; top: number; width: number; height: number } | null>(
     null,
   );
@@ -491,33 +489,14 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
     return areas;
   }, [beamPath, components]);
 
-  const cavityEigenmodeSamples = useMemo(() => {
-    if (cavityEigenmodeAreas.length === 0 || !source) {
-      return [] as Array<{ id: string; points: Array<{ z: number; wMm: number }>; peakWMm: number }>;
-    }
-
-    return cavityEigenmodeAreas.map((area) => {
-      const points: Array<{ z: number; wMm: number }> = [];
-      let peakWMm = 0;
-      for (let i = 0; i <= EIGENMODE_AREA_SAMPLES; i += 1) {
-        const t = i / EIGENMODE_AREA_SAMPLES;
-        const z = area.m1ZMm + t * (area.m2ZMm - area.m1ZMm);
-        const wMm = beamRadiusFromWaist(area.w0Mm, area.z0Mm, z, source.wavelength);
-        points.push({ z, wMm });
-        peakWMm = Math.max(peakWMm, wMm);
-      }
-      return { id: area.id, points, peakWMm };
-    });
-  }, [cavityEigenmodeAreas, source]);
-
   // Target objects always show a marker at their own desired waist size,
   // independent of whether their full mode projection is toggled on.
   const targetWaistMarkers = useMemo(() => {
     if (!beamPath) {
-      return [] as Array<{ z: number; w: number }>;
+      return [] as Array<{ id: string; z: number; w: number; label: string }>;
     }
 
-    const markers: Array<{ z: number; w: number }> = [];
+    const markers: Array<{ id: string; z: number; w: number; label: string }> = [];
     for (const segment of beamPath.segments) {
       const id = segment.terminatedByComponentId;
       if (!id) {
@@ -529,14 +508,17 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
         continue;
       }
 
-      markers.push({ z: segment.zEnd, w: component.waistRadius });
+      markers.push({ id, z: segment.zEnd, w: component.waistRadius, label: component.label });
     }
 
     return markers;
   }, [beamPath, components]);
 
   const profileData = useMemo<ProfilePoint[]>(() => {
-    if (projections.length === 0 || !source) {
+    if (projections.length === 0 && cavityEigenmodeAreas.length === 0) {
+      return baseProfile;
+    }
+    if (!source) {
       return baseProfile;
     }
 
@@ -550,9 +532,18 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
           source.wavelength,
         );
       }
+      // Bounded to the cavity's own physical extent (M1 to M2), unlike the
+      // proj_ fields above which project across the whole path - anything
+      // outside that span is left unset so the fill stops exactly at the
+      // mirrors instead of extending everywhere.
+      for (const area of cavityEigenmodeAreas) {
+        if (point.z >= area.m1ZMm && point.z <= area.m2ZMm) {
+          extended[`eigenmode_${area.id}`] = beamRadiusFromWaist(area.w0Mm, area.z0Mm, point.z, source.wavelength);
+        }
+      }
       return extended;
     });
-  }, [baseProfile, projections, source]);
+  }, [baseProfile, projections, cavityEigenmodeAreas, source]);
 
   const [lockYAxis, setLockYAxis] = useState(false);
   const [lockedYMaxMm, setLockedYMaxMm] = useState(1);
@@ -571,11 +562,14 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
         pointMax = Math.max(pointMax, value);
       }
     }
+    for (const area of cavityEigenmodeAreas) {
+      const value = point[`eigenmode_${area.id}`];
+      if (typeof value === 'number') {
+        pointMax = Math.max(pointMax, value);
+      }
+    }
     return Math.max(maxValue, pointMax);
-  }, Math.max(
-    targetWaistMarkers.reduce((max, marker) => Math.max(max, marker.w), 0),
-    cavityEigenmodeSamples.reduce((max, sample) => Math.max(max, sample.peakWMm), 0),
-  ));
+  }, targetWaistMarkers.reduce((max, marker) => Math.max(max, marker.w), 0));
   const dataXMaxMm = profileData[profileData.length - 1]?.z ?? 0;
   const effectiveYMaxMm = Math.max(lockYAxis ? lockedYMaxMm : profileMaxMm, 0.001);
   const effectiveXMaxMm = Math.max(lockXAxis ? lockedXMaxMm : dataXMaxMm, 0.001);
@@ -623,14 +617,6 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
     setLockedYMaxMm(nextMaxMm);
     setLockYAxis(true);
   };
-  const cavityEigenmodeChartData = useMemo(
-    () =>
-      cavityEigenmodeSamples.map((sample) => ({
-        id: sample.id,
-        data: sample.points.map((point) => ({ z: point.z, eigenAxis: point.wMm * axisScale })),
-      })),
-    [cavityEigenmodeSamples, axisScale],
-  );
   const chartData: Array<Record<string, number | null>> = profileData.map((point) => {
     const scaled: Record<string, number | null> = {
       z: point.z,
@@ -641,6 +627,12 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
       const value = point[`proj_${projection.id}`];
       if (typeof value === 'number') {
         scaled[`proj_${projection.id}Axis`] = value * axisScale;
+      }
+    }
+    for (const area of cavityEigenmodeAreas) {
+      const value = point[`eigenmode_${area.id}`];
+      if (typeof value === 'number') {
+        scaled[`eigenmode_${area.id}Axis`] = value * axisScale;
       }
     }
     return scaled;
@@ -735,7 +727,7 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
       return <g />;
     }
     return (
-      <text x={x} y={y + 12} textAnchor="middle" fontSize={11} fill="#55677a">
+      <text x={x} y={y + 12} textAnchor="middle" fontSize={11} fill="var(--chart-axis-text)">
         {formatAxisMax(payload.value)}
       </text>
     );
@@ -747,9 +739,77 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
       return <g />;
     }
     return (
-      <text x={x} y={y + 4} textAnchor="end" fontSize={11} fill="#55677a">
+      <text x={x} y={y + 4} textAnchor="end" fontSize={11} fill="var(--chart-axis-text)">
         {formatAxisMax(payload.value)}
       </text>
+    );
+  };
+
+  // A draggable handle anchored to the plot's x-axis, letting a lens or
+  // target be slid along the unfolded path the same way whether it started
+  // there or on the 2D table. `className` picks the marker's look (see
+  // .profile-lens-marker / .profile-target-marker).
+  const renderDraggablePathMarker = (marker: { id: string; z: number; label: string }, className: string) => {
+    if (!plotBounds) {
+      return null;
+    }
+
+    // Position against the plot area's real measured pixel bounds (see the
+    // useLayoutEffect above), not the frame's full width - recharts insets
+    // the plot by the Y axis label width, so a percent-of-frame position
+    // drifts left of the actual line.
+    const zSpan = roundedXAxisMax - roundedXAxisMin;
+    const positionRatio = zSpan > 0 ? Math.max(0, Math.min(1, (marker.z - roundedXAxisMin) / zSpan)) : 0;
+    const leftPx = plotBounds.left + positionRatio * plotBounds.width;
+    // Anchored to the measured axis line itself (not a fixed offset from
+    // the frame's bottom edge), so it stays put regardless of how much
+    // vertical room the chart ends up with.
+    const topPx = plotBounds.top + plotBounds.height;
+
+    return (
+      <button
+        key={marker.id}
+        type="button"
+        className={`${className}${draggingComponentId === marker.id ? ' dragging' : ''}`}
+        style={{ left: `${leftPx}px`, top: `${topPx}px` }}
+        title={`Drag ${marker.label} along path`}
+        onPointerDown={(event) => {
+          const frame = frameRef.current;
+          if (!frame) {
+            return;
+          }
+
+          event.preventDefault();
+          setDraggingComponentId(marker.id);
+          event.currentTarget.setPointerCapture(event.pointerId);
+
+          const updateFromClientX = (clientX: number) => {
+            const frameRect = frame.getBoundingClientRect();
+            const bounds = plotBounds ?? { left: 0, width: frameRect.width };
+            if (bounds.width <= 0) {
+              return;
+            }
+            const dragRatio = Math.max(0, Math.min(1, (clientX - frameRect.left - bounds.left) / bounds.width));
+            onMoveComponentAlongPath(marker.id, roundedXAxisMin + dragRatio * (roundedXAxisMax - roundedXAxisMin));
+          };
+
+          updateFromClientX(event.clientX);
+
+          const onMove = (moveEvent: PointerEvent) => updateFromClientX(moveEvent.clientX);
+          const onUp = () => {
+            window.removeEventListener('pointermove', onMove);
+            window.removeEventListener('pointerup', onUp);
+            setDraggingComponentId((active) => (active === marker.id ? null : active));
+          };
+
+          window.addEventListener('pointermove', onMove);
+          window.addEventListener('pointerup', onUp);
+        }}
+      >
+        <span className={`${className}-arrow`} aria-hidden="true">&larr;</span>
+        <span>{marker.label}</span>
+        <span className={`${className}-arrow`} aria-hidden="true">&rarr;</span>
+      </button>
     );
   };
 
@@ -800,13 +860,12 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
               {/* fill="transparent" (rather than the default "none") forces recharts to
                   render a .recharts-cartesian-grid-bg rect, which lens markers below use
                   to measure the plot area's real pixel bounds. */}
-              <CartesianGrid strokeDasharray="3 3" stroke="#d5dde6" fill="transparent" />
+              <CartesianGrid strokeDasharray="3 3" stroke="var(--chart-grid-line)" fill="transparent" />
 
-              {cavityEigenmodeChartData.map((area) => (
+              {cavityEigenmodeAreas.map((area) => (
                 <Area
                   key={`cavity-eigenmode-${area.id}`}
-                  data={area.data}
-                  dataKey="eigenAxis"
+                  dataKey={`eigenmode_${area.id}Axis`}
                   baseValue={0}
                   type="monotone"
                   fill="#9013FE"
@@ -856,7 +915,7 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
                 ticks={yTicks}
                 allowDataOverflow
                 tick={renderYAxisTick}
-                label={{ value: `w (${axisUnitLabel})`, angle: -90, position: 'insideLeft', fill: '#55677a' }}
+                label={{ value: `w (${axisUnitLabel})`, angle: -90, position: 'insideLeft', fill: 'var(--chart-axis-text)' }}
               />
               <Line
                 dataKey="wAxis"
@@ -909,9 +968,9 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
                 <ReferenceLine
                   key={`component-${index}`}
                   x={marker.z}
-                  stroke="#8ca0b5"
+                  stroke="var(--chart-neutral-line)"
                   strokeDasharray="4 4"
-                  label={{ value: marker.label, position: 'insideTop', fill: '#4f6174', fontSize: 11 }}
+                  label={{ value: marker.label, position: 'insideTop', fill: 'var(--chart-axis-text)', fontSize: 11 }}
                 />
               ))}
 
@@ -968,7 +1027,7 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
               {hoveredPoint && (
                 <>
                   <ReferenceLine x={hoveredPoint.z} stroke="#2d9bf0" />
-                  <ReferenceDot x={hoveredPoint.z} y={hoveredPointAxisY ?? 0} r={4} fill="#2d9bf0" stroke="#ffffff" />
+                  <ReferenceDot x={hoveredPoint.z} y={hoveredPointAxisY ?? 0} r={4} fill="#2d9bf0" stroke="var(--chart-marker-ring)" />
                   {showGouyPhase && hoveredGouyPhaseDeg !== null && (
                     <ReferenceDot
                       yAxisId="gouy"
@@ -976,7 +1035,7 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
                       y={hoveredGouyPhaseDeg}
                       r={4}
                       fill="#6f52d9"
-                      stroke="#ffffff"
+                      stroke="var(--chart-marker-ring)"
                     />
                   )}
                 </>
@@ -989,7 +1048,7 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
                   y={waist.w * axisScale}
                   r={4}
                   fill="#2d9bf0"
-                  stroke="#ffffff"
+                  stroke="var(--chart-marker-ring)"
                 />
               ))}
 
@@ -1000,7 +1059,7 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
                   y={marker.w * axisScale}
                   r={5}
                   fill="#17A2B8"
-                  stroke="#ffffff"
+                  stroke="var(--chart-marker-ring)"
                   strokeWidth={2}
                 />
               ))}
@@ -1009,68 +1068,9 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
         </div>
 
         {plotBounds &&
-          lensMarkers.map((marker) => {
-            // Position against the plot area's real measured pixel bounds
-            // (see the useLayoutEffect above), not the frame's full width -
-            // recharts insets the plot by the Y axis label width, so a
-            // percent-of-frame position drifts left of the actual line.
-            const zSpan = roundedXAxisMax - roundedXAxisMin;
-            const positionRatio =
-              zSpan > 0 ? Math.max(0, Math.min(1, (marker.z - roundedXAxisMin) / zSpan)) : 0;
-            const leftPx = plotBounds.left + positionRatio * plotBounds.width;
-            // Anchored to the measured axis line itself (not a fixed offset
-            // from the frame's bottom edge), so it stays put regardless of
-            // how much vertical room the chart ends up with.
-            const topPx = plotBounds.top + plotBounds.height;
-            return (
-              <button
-                key={marker.id}
-                type="button"
-                className={`profile-lens-marker${draggingLensId === marker.id ? ' dragging' : ''}`}
-                style={{ left: `${leftPx}px`, top: `${topPx}px` }}
-                title={`Drag ${marker.label} along path`}
-                onPointerDown={(event) => {
-                  const frame = frameRef.current;
-                  if (!frame) {
-                    return;
-                  }
-
-                  event.preventDefault();
-                  setDraggingLensId(marker.id);
-                  event.currentTarget.setPointerCapture(event.pointerId);
-
-                  const updateFromClientX = (clientX: number) => {
-                    const frameRect = frame.getBoundingClientRect();
-                    const bounds = plotBounds ?? { left: 0, width: frameRect.width };
-                    if (bounds.width <= 0) {
-                      return;
-                    }
-                    const dragRatio = Math.max(
-                      0,
-                      Math.min(1, (clientX - frameRect.left - bounds.left) / bounds.width),
-                    );
-                    onMoveLensAlongPath(marker.id, roundedXAxisMin + dragRatio * (roundedXAxisMax - roundedXAxisMin));
-                  };
-
-                  updateFromClientX(event.clientX);
-
-                  const onMove = (moveEvent: PointerEvent) => updateFromClientX(moveEvent.clientX);
-                  const onUp = () => {
-                    window.removeEventListener('pointermove', onMove);
-                    window.removeEventListener('pointerup', onUp);
-                    setDraggingLensId((active) => (active === marker.id ? null : active));
-                  };
-
-                  window.addEventListener('pointermove', onMove);
-                  window.addEventListener('pointerup', onUp);
-                }}
-              >
-                <span className="profile-lens-marker-arrow" aria-hidden="true">&larr;</span>
-                <span>{marker.label}</span>
-                <span className="profile-lens-marker-arrow" aria-hidden="true">&rarr;</span>
-              </button>
-            );
-          })}
+          lensMarkers.map((marker) => renderDraggablePathMarker(marker, 'profile-lens-marker'))}
+        {plotBounds &&
+          targetWaistMarkers.map((marker) => renderDraggablePathMarker(marker, 'profile-target-marker'))}
 
         {hoveredPoint && (
           <div className="profile-hover-card">
@@ -1088,16 +1088,12 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
               className="profile-axis-edge-field profile-axis-edge-field--x-min"
               style={{ left: `${plotBounds.left}px`, top: `${plotBounds.top + plotBounds.height}px` }}
             >
-              <input
-                type="text"
-                inputMode="decimal"
+              <NumericField
                 aria-label="X axis minimum (mm)"
                 className="profile-axis-edge-input"
-                value={formatAxisMax(effectiveXMinMm)}
-                onChange={(event) => applyXRange(Number(event.target.value), effectiveXMaxMm)}
-                onKeyDown={(event) =>
-                  handleCaretStepKeyDown(event, (value) => applyXRange(value, effectiveXMaxMm))
-                }
+                value={effectiveXMinMm}
+                format={formatAxisMax}
+                onCommit={(value) => applyXRange(value, effectiveXMaxMm)}
               />
             </div>
             <div
@@ -1107,16 +1103,12 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
                 top: `${plotBounds.top + plotBounds.height}px`,
               }}
             >
-              <input
-                type="text"
-                inputMode="decimal"
+              <NumericField
                 aria-label="X axis maximum (mm)"
                 className="profile-axis-edge-input"
-                value={formatAxisMax(effectiveXMaxMm)}
-                onChange={(event) => applyXRange(effectiveXMinMm, Number(event.target.value))}
-                onKeyDown={(event) =>
-                  handleCaretStepKeyDown(event, (value) => applyXRange(effectiveXMinMm, value))
-                }
+                value={effectiveXMaxMm}
+                format={formatAxisMax}
+                onCommit={(value) => applyXRange(effectiveXMinMm, value)}
               />
               <button
                 type="button"
@@ -1131,16 +1123,12 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
               className="profile-axis-edge-field profile-axis-edge-field--y-min"
               style={{ left: `${plotBounds.left}px`, top: `${plotBounds.top + plotBounds.height}px` }}
             >
-              <input
-                type="text"
-                inputMode="decimal"
+              <NumericField
                 aria-label={`Y axis minimum (${axisUnitLabel})`}
                 className="profile-axis-edge-input"
-                value={formatAxisMax(effectiveYMinMm * axisScale)}
-                onChange={(event) => applyYRange(Number(event.target.value) / axisScale, effectiveYMaxMm)}
-                onKeyDown={(event) =>
-                  handleCaretStepKeyDown(event, (value) => applyYRange(value / axisScale, effectiveYMaxMm))
-                }
+                value={effectiveYMinMm * axisScale}
+                format={formatAxisMax}
+                onCommit={(value) => applyYRange(value / axisScale, effectiveYMaxMm)}
               />
             </div>
             <div
@@ -1155,16 +1143,12 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
               >
                 <img className="icon-glyph" src={lockYAxis ? lockIcon : lockOpenIcon} alt="" />
               </button>
-              <input
-                type="text"
-                inputMode="decimal"
+              <NumericField
                 aria-label={`Y axis maximum (${axisUnitLabel})`}
                 className="profile-axis-edge-input"
-                value={formatAxisMax(effectiveYMaxMm * axisScale)}
-                onChange={(event) => applyYRange(effectiveYMinMm, Number(event.target.value) / axisScale)}
-                onKeyDown={(event) =>
-                  handleCaretStepKeyDown(event, (value) => applyYRange(effectiveYMinMm, value / axisScale))
-                }
+                value={effectiveYMaxMm * axisScale}
+                format={formatAxisMax}
+                onCommit={(value) => applyYRange(effectiveYMinMm, value / axisScale)}
               />
             </div>
           </>

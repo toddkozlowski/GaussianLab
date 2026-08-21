@@ -9,6 +9,8 @@ import React, { useRef } from 'react';
 import { Group, Line, Rect, Text } from 'react-konva';
 import type Konva from 'konva';
 import type { BeamStopComponent, Point2d } from '../../../app/state/schema';
+import { useTheme } from '../../../app/adapters/useTheme';
+import { getCanvasColors } from '../canvasTheme';
 
 interface BeamStopRendererProps {
   component: BeamStopComponent;
@@ -32,6 +34,8 @@ export const BeamStopRenderer: React.FC<BeamStopRendererProps> = ({
   getSnappedDragPositionPx,
 }) => {
   const groupRef = useRef<Konva.Group>(null);
+  const { theme } = useTheme();
+  const colors = getCanvasColors(theme);
 
   const x = mmToPx(component.position.x);
   const y = mmToPx(component.position.y);
@@ -91,7 +95,7 @@ export const BeamStopRenderer: React.FC<BeamStopRendererProps> = ({
         y={-8}
         text={component.label}
         fontSize={12}
-        fill="#333"
+        fill={colors.label}
         pointerEvents="none"
       />
       <Text
@@ -99,7 +103,7 @@ export const BeamStopRenderer: React.FC<BeamStopRendererProps> = ({
         y={6}
         text="beam stop"
         fontSize={10}
-        fill="#666"
+        fill={colors.labelSecondary}
         pointerEvents="none"
       />
     </Group>

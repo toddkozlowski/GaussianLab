@@ -11,8 +11,9 @@ describe('Layer 5 solver workflow', () => {
     // Add a target object (placed on the beam by default) to mode-match against.
     fireEvent.click(screen.getByRole('button', { name: '+ Target' }));
 
-    // Expand mode-matching controls (collapsed by default).
-    fireEvent.click(screen.getByRole('button', { name: 'Expand mode matching' }));
+    // Expand mode-matching controls (collapsed by default) - the whole
+    // section header is the toggle button.
+    fireEvent.click(screen.getByRole('button', { name: 'Mode Matching' }));
 
     // Selecting the target object from the dropdown implicitly primes it as
     // the mode-matching target - no separate confirmation button.

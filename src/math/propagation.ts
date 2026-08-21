@@ -38,22 +38,70 @@ export class ConcreteBeamPropagationEngine implements PropagationEngine {
     let z_current = 0; // Absolute position in system
 
     // Accumulated (unwrapped) Gouy phase, tracked continuously across the
-    // whole path. Within any pure free-space stretch - which includes a
-    // custom-object slab's segment, since its correction only ever shifts
-    // Re(q) - Im(q) is invariant, so atan(Re(q)/Im(q)) is exactly the local
-    // Gouy phase and its delta across the stretch is exact. A thin lens
+    // whole path. Within any pure free-space stretch of uniform index - Im(q)
+    // is invariant there, so atan(Re(q)/Im(q)) is exactly the local Gouy
+    // phase and its delta across the stretch is exact. A thin lens
     // contributes zero *additional* Gouy phase at the instant it's crossed
     // (its ABCD matrix has B=0, so the general accumulated-phase formula
-    // -arg(A + B/q) evaluates to -arg(1) = 0) - same for the cavity-coupling
-    // substitution, which is a modelling event rather than a real optical
-    // element. So boundaries simply carry the running total forward
-    // unchanged, and each new segment resumes accumulating from its own q.
+    // -arg(A + B/q) evaluates to -arg(1) = 0) - same for a dielectric
+    // interface (B=0 there too) and the cavity-coupling substitution, which
+    // is a modelling event rather than a real optical element. So boundaries
+    // simply carry the running total forward unchanged, and each new stretch
+    // resumes accumulating from its own q.
     let gouyPhaseRad = gouyPhaseFromQ(qCurrent);
 
     const profile: Array<{ z: number; w: number; gouyPhaseDeg: number }> = []; // in mm / degrees
     const waists: PropagationWaist[] = [];
     const qAtComponent: Record<string, ComplexNumber> = {};
     const cavityOverlap: Record<string, number> = {};
+
+    // A dielectric slab's front face is where its owning segment ends, but
+    // geometry doesn't carve out a distinct segment for the slab's interior -
+    // the *following* segment's own distance already spans the slab's full
+    // physical thickness plus whatever ordinary free space comes after it.
+    // So the entry refraction is applied where that boundary is crossed
+    // (below), and this carries the slab's index/thickness forward to be
+    // consumed out of the next segment's own stretch.
+    let pendingCustomObject: { refractiveIndex: number; thicknessM: number } | null = null;
+
+    // Advances qCurrent/z_current/gouyPhaseRad across `distanceM` of uniform-
+    // index free space, densely sampling the profile as it goes and
+    // recording a waist if the beam comes to a focus within the stretch.
+    const advance = (distanceM: number, refractiveIndex: number, waistComponentId: string | null) => {
+      const stretchWaistAt = -qCurrent.re;
+      if (stretchWaistAt >= 0 && stretchWaistAt <= distanceM) {
+        const localWaistRadius = Math.sqrt((wavelengthMetres * qCurrent.im) / (Math.PI * refractiveIndex));
+        if (Number.isFinite(localWaistRadius) && localWaistRadius > 0) {
+          waists.push({
+            z: z_current + stretchWaistAt,
+            w: localWaistRadius,
+            componentId: waistComponentId,
+          });
+        }
+      }
+
+      const stretchStartPhaseRad = gouyPhaseFromQ(qCurrent);
+      let pointGouyPhaseRad = gouyPhaseRad;
+
+      const sampleCount = Math.max(1, Math.ceil(distanceM / 0.001));
+      for (let i = 0; i <= sampleCount; i += 1) {
+        const zLocal = (distanceM * i) / sampleCount;
+        const qLocal: Complex = {
+          re: qCurrent.re + zLocal,
+          im: qCurrent.im,
+        };
+        pointGouyPhaseRad = gouyPhaseRad + (gouyPhaseFromQ(qLocal) - stretchStartPhaseRad);
+
+        profile.push({
+          z: (z_current + zLocal) * 1000,
+          w: beamRadiusFromQ(qLocal, wavelengthMetres, refractiveIndex) * 1000,
+          gouyPhaseDeg: (pointGouyPhaseRad * 180) / Math.PI,
+        });
+      }
+      gouyPhaseRad = pointGouyPhaseRad;
+      qCurrent = { re: qCurrent.re + distanceM, im: qCurrent.im };
+      z_current += distanceM;
+    };
 
     // Propagate through each segment. Each segment models free-space travel only.
     // Component transforms happen at the segment boundary after sampling.
@@ -69,42 +117,27 @@ export class ConcreteBeamPropagationEngine implements PropagationEngine {
       const { distance, componentId } = segment;
       const distanceM = distance / 1000;
 
-      const segmentWaistAt = -qCurrent.re;
-      if (segmentWaistAt >= 0 && segmentWaistAt <= distanceM) {
-        const localWaistRadius = Math.sqrt((wavelengthMetres * qCurrent.im) / Math.PI);
-        if (Number.isFinite(localWaistRadius) && localWaistRadius > 0) {
-          waists.push({
-            z: z_current + segmentWaistAt,
-            w: localWaistRadius,
-            componentId,
-          });
-        }
-      }
-
-      const segmentStartPhaseRad = gouyPhaseFromQ(qCurrent);
-      let pointGouyPhaseRad = gouyPhaseRad;
-
-      const sampleCount = Math.max(1, Math.ceil(distanceM / 0.001));
-      for (let i = 0; i <= sampleCount; i += 1) {
-        const zLocal = (distanceM * i) / sampleCount;
-        const qLocal: Complex = {
-          re: qCurrent.re + zLocal,
-          im: qCurrent.im,
+      if (pendingCustomObject) {
+        // Traverse the slab's interior at its own (reduced-divergence) rate,
+        // then refract back out at its rear face before resuming ordinary
+        // free space for whatever distance remains in this segment.
+        const mediumDistanceM = Math.min(pendingCustomObject.thicknessM, distanceM);
+        advance(mediumDistanceM, pendingCustomObject.refractiveIndex, componentId);
+        qCurrent = {
+          re: qCurrent.re / pendingCustomObject.refractiveIndex,
+          im: qCurrent.im / pendingCustomObject.refractiveIndex,
         };
-        pointGouyPhaseRad = gouyPhaseRad + (gouyPhaseFromQ(qLocal) - segmentStartPhaseRad);
 
-        profile.push({
-          z: (z_current + zLocal) * 1000,
-          w: beamRadiusFromQ(qLocal, wavelengthMetres) * 1000,
-          gouyPhaseDeg: (pointGouyPhaseRad * 180) / Math.PI,
-        });
+        const remainderDistanceM = distanceM - mediumDistanceM;
+        pendingCustomObject = null;
+        if (remainderDistanceM > 0) {
+          advance(remainderDistanceM, 1, componentId);
+        }
+      } else {
+        advance(distanceM, 1, componentId);
       }
-      gouyPhaseRad = pointGouyPhaseRad;
 
-      const qAtBoundary: Complex = {
-        re: qCurrent.re + distanceM,
-        im: qCurrent.im,
-      };
+      const qAtBoundary: Complex = qCurrent;
 
       let qAfterBoundary = qAtBoundary;
       let terminateAfterBoundary = false;
@@ -120,23 +153,23 @@ export class ConcreteBeamPropagationEngine implements PropagationEngine {
           });
         }
       } else if (segment.componentKind === 'custom_object') {
-        // A flat-faced dielectric slab of physical thickness t and index n has
-        // optical path t/n. The geometric segment that follows already spans
-        // the slab's full physical thickness as ordinary free space, so a
-        // single translation of -t(1 - 1/n) applied here (order-independent,
-        // since translation matrices commute) reduces that to the correct t/n
-        // once the following free-space propagation is added. At n=1 the slab
-        // is optically transparent, so no correction is applied.
+        // A flat-faced dielectric slab of physical thickness t and index n:
+        // refract into the medium here (a flat interface's ABCD matrix,
+        // D = n1/n2 = 1/n, scales q by n - see beamRadiusFromQ for how that
+        // keeps the reported beam radius continuous across the face), then
+        // let the *next* segment's own stretch spend the slab's thickness at
+        // the medium's reduced-divergence rate before refracting back out.
+        // At n=1 the slab is optically transparent, so nothing is applied.
         const n = segment.customObjectIndexOfRefraction;
         const thicknessMm = segment.customObjectThicknessMm;
-        if (typeof n === 'number' && typeof thicknessMm === 'number' && Math.abs(n - 1) > 1e-9) {
-          const reductionM = (thicknessMm / 1000) * (1 - 1 / n);
+        if (typeof n === 'number' && typeof thicknessMm === 'number' && Math.abs(n - 1) > 1e-9 && thicknessMm > 0) {
           qAfterBoundary = propagateQ(qAtBoundary, {
             A: 1,
-            B: -reductionM,
+            B: 0,
             C: 0,
-            D: 1,
+            D: 1 / n,
           });
+          pendingCustomObject = { refractiveIndex: n, thicknessM: thicknessMm / 1000 };
         }
       } else if (segment.componentKind === 'cavity_fp' && segment.cavityEigenmode?.isStable) {
         const cavityQAtM1 = cavityEigenmodeAtM1(segment.cavityEigenmode, wavelengthMetres);
@@ -182,7 +215,6 @@ export class ConcreteBeamPropagationEngine implements PropagationEngine {
       }
 
       qCurrent = qAfterBoundary;
-      z_current += distanceM;
 
       if (terminateAfterBoundary) {
         break;
@@ -221,14 +253,21 @@ function gouyPhaseFromQ(q: Complex): number {
   return Math.atan(q.re / q.im);
 }
 
-function beamRadiusFromQ(q: Complex, wavelengthMetres: number): number {
+/**
+ * @param refractiveIndex Local index of refraction at `q`'s position (1 for
+ * vacuum/air). Physically, w(z) = sqrt(-lambda0 / (pi * n * Im(1/q))) - see
+ * the "reduced q" convention documented above the custom-object handling in
+ * propagateBeam, which keeps q itself defined with the vacuum wavelength and
+ * only needs this extra factor at readout time.
+ */
+function beamRadiusFromQ(q: Complex, wavelengthMetres: number, refractiveIndex: number = 1): number {
   const denom = q.re * q.re + q.im * q.im;
   if (denom <= 0 || q.im <= 0) {
     return 1e-6;
   }
 
   const invQIm = -q.im / denom;
-  const wSq = -wavelengthMetres / (Math.PI * invQIm);
+  const wSq = -wavelengthMetres / (Math.PI * invQIm * refractiveIndex);
   if (!Number.isFinite(wSq) || wSq <= 0) {
     return 1e-6;
   }

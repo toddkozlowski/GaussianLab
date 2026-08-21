@@ -1,6 +1,6 @@
 import { lazy, Suspense } from 'react';
 import { useAppStore } from '../adapters/useAppStore';
-import { computeLiveModeOverlap, moveLensToPathZ } from '../state';
+import { computeLiveModeOverlap, moveComponentToPathZ } from '../state';
 import helpIcon from '../../../icons/circle-question-mark.svg';
 
 const BeamProfileChart = lazy(() => import('../../ui/profile/BeamProfileChart').then((module) => ({
@@ -22,15 +22,15 @@ export function ProfilePane({ hoveredZMm, onHoverZMm }: ProfilePaneProps) {
     typeof window.navigator !== 'undefined' &&
     /jsdom/i.test(window.navigator.userAgent);
 
-  const handleLensPathMove = (lensId: string, zMm: number) => {
-    const position = moveLensToPathZ(state, lensId, zMm);
+  const handleComponentPathMove = (componentId: string, zMm: number) => {
+    const position = moveComponentToPathZ(state, componentId, zMm);
     if (!position) {
       return;
     }
     dispatch({
       type: 'UPDATE_COMPONENT',
       payload: {
-        id: lensId,
+        id: componentId,
         updates: { position },
       },
     });
@@ -46,8 +46,8 @@ export function ProfilePane({ hoveredZMm, onHoverZMm }: ProfilePaneProps) {
               <img className="icon-glyph" src={helpIcon} alt="" />
             </summary>
             <div>
-              Drag lens markers directly on the 1D profile to slide them along the unfolded beam path.
-              The propagation and overlap readout update live during dragging.
+              Drag lens or target markers directly on the 1D profile to slide them along the unfolded
+              beam path. The propagation and overlap readout update live during dragging.
             </div>
           </details>
         </div>
@@ -66,7 +66,7 @@ export function ProfilePane({ hoveredZMm, onHoverZMm }: ProfilePaneProps) {
               hoveredZMm={hoveredZMm}
               onHoverZMm={onHoverZMm}
               liveOverlap={liveOverlap}
-              onMoveLensAlongPath={handleLensPathMove}
+              onMoveComponentAlongPath={handleComponentPathMove}
             />
           </Suspense>
         )}

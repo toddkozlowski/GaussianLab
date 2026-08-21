@@ -7,27 +7,49 @@ import {
   createCustomObjectComponent,
   createFlatMirrorComponent,
   createLensThinComponent,
-  createSourceComponent,
   createTargetComponent,
 } from '../state/componentFactories';
-import type { AppState, CardinalDirection, OpticalComponent, Point2d, TargetMode } from '../state/schema';
+import type { AppState, CardinalDirection, MirrorOrientation, OpticalComponent, Point2d, TargetMode } from '../state/schema';
 import {
   computeDangerousPairs,
   getComponentPathPosition,
   getMovableLenses,
   moveComponentToPathZ,
+  parseCavityRadius,
   DANGEROUS_PROXIMITY_THRESHOLD_MM,
   MAX_OPTIMIZER_LENSES,
 } from '../state';
 import { snapPointToGrid } from '../state/snapToGrid';
 import { GAUSSIAN_FILE_EXTENSION, parseAppState, serializeAppState } from '../state/fileFormat';
-import { handleCaretStepKeyDown } from '../../ui/shared/numericCaretStep';
+import { NumericField } from '../../ui/shared/NumericField';
+import { SettingsModal } from './SettingsModal';
 import chevronDownIcon from '../../../icons/circle-chevron-down.svg';
 import chevronUpIcon from '../../../icons/circle-chevron-up.svg';
 import circlePlusIcon from '../../../icons/circle-plus.svg';
 import helpIcon from '../../../icons/circle-question-mark.svg';
 import trashIcon from '../../../icons/trash-2.svg';
 import warningIcon from '../../../icons/triangle-alert.svg';
+
+/**
+ * Which orientation to give a newly-added mirror so its reflective face
+ * actually faces the beam it's dropped onto, rather than always defaulting
+ * to 45 regardless of the beam's direction there (which would present the
+ * mirror's substrate/back side to the beam instead of its coating whenever
+ * the beam wasn't already travelling 'right').
+ *
+ * Each orientation's reflective coating only faces two of the four cardinal
+ * directions (see SUBSTRATE_DIRECTION and reflectDirection's table in
+ * beamPathResolver.ts) - this picks one of that pair for each incoming
+ * direction, consistently turning the beam the same rotational way
+ * (right->up->left->down->right) so the result is always a genuine
+ * front-face reflection.
+ */
+export const DEFAULT_MIRROR_ORIENTATION: Record<CardinalDirection, MirrorOrientation> = {
+  right: 45,
+  up: 135,
+  left: 225,
+  down: 315,
+};
 
 function defaultSaveFileName(): string {
   const now = new Date();
@@ -53,6 +75,7 @@ function downloadTextFile(filename: string, content: string) {
 export function Sidebar() {
   const { state, dispatch, runSolver, applySolution, resetTable } = useAppStore();
   const [modeMatchingOpen, setModeMatchingOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const applyLoadedFile = (text: string) => {
@@ -179,15 +202,11 @@ export function Sidebar() {
     ? snapPointToGrid(defaultPlacement.position, state.table.gridStandard)
     : defaultPlacement.position;
 
-  const addSource = () => {
-    const source = createSourceComponent(state.components, gridSnappedDefaultPosition);
-    dispatch({ type: 'ADD_COMPONENT', payload: source });
-    dispatch({ type: 'SET_SOURCE_ID', payload: { sourceId: source.id } });
-    dispatch({ type: 'SET_SELECTED_COMPONENT', payload: { componentId: source.id } });
-  };
-
   const addMirror = () => {
     const mirror = createFlatMirrorComponent(state.components, gridSnappedDefaultPosition);
+    // Face the mirror's reflective coating toward the beam it's landing on,
+    // rather than always defaulting to 45 (see DEFAULT_MIRROR_ORIENTATION).
+    mirror.orientation = DEFAULT_MIRROR_ORIENTATION[defaultPlacement.direction];
     dispatch({ type: 'ADD_COMPONENT', payload: mirror });
     dispatch({ type: 'SET_SELECTED_COMPONENT', payload: { componentId: mirror.id } });
   };
@@ -269,6 +288,7 @@ export function Sidebar() {
           <div className="file-toolbar-actions">
             <button type="button" onClick={handleSave}>Save</button>
             <button type="button" onClick={handleLoad}>Load</button>
+            <button type="button" onClick={() => setSettingsOpen(true)}>Settings</button>
             <button
               type="button"
               className="icon-button danger-button"
@@ -316,7 +336,6 @@ export function Sidebar() {
         </header>
         <div className="panel-body component-table-panel">
           <div className="component-toolbar">
-            <button type="button" onClick={addSource}>+ Source</button>
             <button type="button" onClick={addMirror}>+ Mirror</button>
             <button type="button" onClick={addLens}>+ Lens</button>
             <button type="button" onClick={addCavity}>+ Cavity</button>
@@ -392,7 +411,7 @@ export function Sidebar() {
                       <td>
                         {renderDeltaZCell(component, pathPosition, rowPreviousPathPosition, state, dispatch)}
                       </td>
-                      <td>{renderPropertyCell(component, dispatch)}</td>
+                      <td>{renderPropertyCell(component, dispatch, isSelected)}</td>
                       <td>
                         <span className="sensitivity-cell">{formatSensitivity(component)}</span>
                       </td>
@@ -420,17 +439,19 @@ export function Sidebar() {
                         </button>
                       </td>
                       <td className="icon-col">
-                        <button
-                          type="button"
-                          className="icon-button danger-button"
-                          aria-label="Delete component"
-                          onClick={(event) => {
-                            event.stopPropagation();
-                            dispatch({ type: 'REMOVE_COMPONENT', payload: { id: component.id } });
-                          }}
-                        >
-                          <img className="icon-glyph" src={trashIcon} alt="" />
-                        </button>
+                        {component.kind !== 'source' && (
+                          <button
+                            type="button"
+                            className="icon-button danger-button"
+                            aria-label="Delete component"
+                            onClick={(event) => {
+                              event.stopPropagation();
+                              dispatch({ type: 'REMOVE_COMPONENT', payload: { id: component.id } });
+                            }}
+                          >
+                            <img className="icon-glyph" src={trashIcon} alt="" />
+                          </button>
+                        )}
                       </td>
                       <td className="icon-col">
                         {warningMessages.length > 0 && (
@@ -458,16 +479,14 @@ export function Sidebar() {
       </section>
 
       <section className="panel mode-matching-panel">
-        <header className="panel-header">
-          <div>
-            <h3>Mode Matching</h3>
-          </div>
+        <header className={modeMatchingOpen ? 'panel-header' : 'panel-header panel-header--collapsed'}>
           <button
             type="button"
-            className="icon-button"
-            aria-label={modeMatchingOpen ? 'Collapse mode matching' : 'Expand mode matching'}
+            className="mode-matching-header-toggle"
+            aria-expanded={modeMatchingOpen}
             onClick={() => setModeMatchingOpen((open) => !open)}
           >
+            <h3>Mode Matching</h3>
             <img className="icon-glyph" src={modeMatchingOpen ? chevronUpIcon : chevronDownIcon} alt="" />
           </button>
         </header>
@@ -523,51 +542,25 @@ export function Sidebar() {
                     <div className="manual-range-row" key={range.id}>
                       <label className="manual-range-field">
                         Start (mm)
-                        <input
-                          type="text"
-                          inputMode="decimal"
-                          value={formatFixed3(range.startZMm)}
-                          onChange={(event) => {
-                            const value = Number(event.target.value);
-                            if (Number.isFinite(value)) {
-                              dispatch({
-                                type: 'UPDATE_MANUAL_RANGE',
-                                payload: { id: range.id, updates: { startZMm: value } },
-                              });
-                            }
-                          }}
-                          onKeyDown={(event) =>
-                            handleCaretStepKeyDown(event, (value) =>
-                              dispatch({
-                                type: 'UPDATE_MANUAL_RANGE',
-                                payload: { id: range.id, updates: { startZMm: value } },
-                              }),
-                            )
+                        <NumericField
+                          value={range.startZMm}
+                          onCommit={(value) =>
+                            dispatch({
+                              type: 'UPDATE_MANUAL_RANGE',
+                              payload: { id: range.id, updates: { startZMm: value } },
+                            })
                           }
                         />
                       </label>
                       <label className="manual-range-field">
                         Stop (mm)
-                        <input
-                          type="text"
-                          inputMode="decimal"
-                          value={formatFixed3(range.endZMm)}
-                          onChange={(event) => {
-                            const value = Number(event.target.value);
-                            if (Number.isFinite(value)) {
-                              dispatch({
-                                type: 'UPDATE_MANUAL_RANGE',
-                                payload: { id: range.id, updates: { endZMm: value } },
-                              });
-                            }
-                          }}
-                          onKeyDown={(event) =>
-                            handleCaretStepKeyDown(event, (value) =>
-                              dispatch({
-                                type: 'UPDATE_MANUAL_RANGE',
-                                payload: { id: range.id, updates: { endZMm: value } },
-                              }),
-                            )
+                        <NumericField
+                          value={range.endZMm}
+                          onCommit={(value) =>
+                            dispatch({
+                              type: 'UPDATE_MANUAL_RANGE',
+                              payload: { id: range.id, updates: { endZMm: value } },
+                            })
                           }
                         />
                       </label>
@@ -644,6 +637,8 @@ export function Sidebar() {
           </div>
         )}
       </section>
+
+      {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
     </aside>
   );
 }
@@ -701,26 +696,12 @@ function renderZCell(
   };
 
   return (
-    <input
+    <NumericField
       className="z-cell-input"
-      type="text"
-      inputMode="decimal"
       disabled={component.locked}
-      value={pathPosition === null ? '' : formatFixed3(pathPosition)}
+      value={pathPosition}
       placeholder={pathPosition === null ? 'off-path' : undefined}
-      onChange={(event) => {
-        event.stopPropagation();
-        const value = Number(event.target.value);
-        if (Number.isFinite(value)) {
-          commitZ(value);
-        }
-      }}
-      onKeyDown={(event) =>
-        handleCaretStepKeyDown(event, (value) => {
-          event.stopPropagation();
-          commitZ(value);
-        })
-      }
+      onCommit={commitZ}
     />
   );
 }
@@ -761,91 +742,89 @@ function renderDeltaZCell(
   };
 
   return (
-    <input
+    <NumericField
       className="delta-z-cell-input"
-      type="text"
-      inputMode="decimal"
       disabled={component.locked}
-      value={deltaZ === null ? '' : formatFixed3(deltaZ)}
+      value={deltaZ}
       placeholder={pathPosition === null ? 'off-path' : undefined}
-      onChange={(event) => {
-        event.stopPropagation();
-        const value = Number(event.target.value);
-        if (Number.isFinite(value)) {
-          commitDeltaZ(value);
-        }
-      }}
-      onKeyDown={(event) =>
-        handleCaretStepKeyDown(event, (value) => {
-          event.stopPropagation();
-          commitDeltaZ(value);
-        })
-      }
+      onCommit={commitDeltaZ}
     />
   );
 }
 
+/**
+ * The Property column normally shows just the one field most worth seeing
+ * at a glance. Kinds with more than one (source, cavity, custom object) get
+ * the rest stacked in as extra lines while selected, rather than all the
+ * time, to keep unselected rows compact.
+ */
 function renderPropertyCell(
   component: OpticalComponent,
-  dispatch: ReturnType<typeof useAppStore>['dispatch']
+  dispatch: ReturnType<typeof useAppStore>['dispatch'],
+  isSelected: boolean,
 ) {
   if (component.kind === 'source') {
-    return (
-      <PropField prefix="w₀=" suffix="um">
-        <input
-          type="text"
-          inputMode="decimal"
+    const waistField = (
+      <PropField key="w0" prefix="w₀=" suffix="um">
+        <NumericField
           disabled={component.locked}
-          value={Math.round(component.waistRadius * 1000)}
-          onChange={(event) => {
-            event.stopPropagation();
-            const value = Number(event.target.value);
-            if (Number.isFinite(value)) {
-              dispatch({
-                type: 'UPDATE_COMPONENT',
-                payload: { id: component.id, updates: { waistRadius: Math.max(1, value) / 1000 } },
-              });
-            }
-          }}
-          onKeyDown={(event) =>
-            handleCaretStepKeyDown(event, (value) => {
-              event.stopPropagation();
-              dispatch({
-                type: 'UPDATE_COMPONENT',
-                payload: { id: component.id, updates: { waistRadius: Math.max(1, value) / 1000 } },
-              });
+          value={component.waistRadius * 1000}
+          format={(value) => String(Math.round(value))}
+          onCommit={(value) =>
+            dispatch({
+              type: 'UPDATE_COMPONENT',
+              payload: { id: component.id, updates: { waistRadius: Math.max(1, value) / 1000 } },
             })
           }
         />
       </PropField>
+    );
+
+    if (!isSelected) {
+      return waistField;
+    }
+
+    return (
+      <div className="property-cell-stack">
+        {waistField}
+        <PropField key="z0" prefix="z₀=" suffix="mm">
+          <NumericField
+            disabled={component.locked}
+            value={component.waistOffset}
+            onCommit={(value) =>
+              dispatch({
+                type: 'UPDATE_COMPONENT',
+                payload: { id: component.id, updates: { waistOffset: round3(value) } },
+              })
+            }
+          />
+        </PropField>
+        <PropField key="lambda" prefix="λ=" suffix="nm">
+          <NumericField
+            disabled={component.locked}
+            value={component.wavelength}
+            onCommit={(value) =>
+              dispatch({
+                type: 'UPDATE_COMPONENT',
+                payload: { id: component.id, updates: { wavelength: Math.max(1, value) } },
+              })
+            }
+          />
+        </PropField>
+      </div>
     );
   }
 
   if (component.kind === 'lens_thin') {
     return (
       <PropField prefix="f=" suffix="mm">
-        <input
-          type="text"
-          inputMode="decimal"
+        <NumericField
           disabled={component.locked}
-          value={formatFixed3(component.focalLength)}
-          onChange={(event) => {
-            event.stopPropagation();
-            const value = Number(event.target.value);
-            if (Number.isFinite(value)) {
-              dispatch({
-                type: 'UPDATE_COMPONENT',
-                payload: { id: component.id, updates: { focalLength: value } },
-              });
-            }
-          }}
-          onKeyDown={(event) =>
-            handleCaretStepKeyDown(event, (value) => {
-              event.stopPropagation();
-              dispatch({
-                type: 'UPDATE_COMPONENT',
-                payload: { id: component.id, updates: { focalLength: value } },
-              });
+          value={component.focalLength}
+          onCommit={(value) =>
+            dispatch({
+              type: 'UPDATE_COMPONENT',
+              payload: { id: component.id, updates: { focalLength: value } },
             })
           }
         />
@@ -879,28 +858,14 @@ function renderPropertyCell(
   if (component.kind === 'target') {
     return (
       <PropField prefix="w₀=" suffix="um">
-        <input
-          type="text"
-          inputMode="decimal"
+        <NumericField
           disabled={component.locked}
-          value={Math.round(component.waistRadius * 1000)}
-          onChange={(event) => {
-            event.stopPropagation();
-            const value = Number(event.target.value);
-            if (Number.isFinite(value)) {
-              dispatch({
-                type: 'UPDATE_COMPONENT',
-                payload: { id: component.id, updates: { waistRadius: Math.max(1, value) / 1000 } },
-              });
-            }
-          }}
-          onKeyDown={(event) =>
-            handleCaretStepKeyDown(event, (value) => {
-              event.stopPropagation();
-              dispatch({
-                type: 'UPDATE_COMPONENT',
-                payload: { id: component.id, updates: { waistRadius: Math.max(1, value) / 1000 } },
-              });
+          value={component.waistRadius * 1000}
+          format={(value) => String(Math.round(value))}
+          onCommit={(value) =>
+            dispatch({
+              type: 'UPDATE_COMPONENT',
+              payload: { id: component.id, updates: { waistRadius: Math.max(1, value) / 1000 } },
             })
           }
         />
@@ -913,66 +878,101 @@ function renderPropertyCell(
   }
 
   if (component.kind === 'custom_object') {
-    return (
-      <PropField prefix="n=">
-        <input
-          type="text"
-          inputMode="decimal"
+    const indexField = (
+      <PropField key="n" prefix="n=">
+        <NumericField
           disabled={component.locked}
-          value={formatFixed3(component.indexOfRefraction)}
-          onChange={(event) => {
-            event.stopPropagation();
-            const value = Number(event.target.value);
-            if (Number.isFinite(value)) {
-              dispatch({
-                type: 'UPDATE_COMPONENT',
-                payload: { id: component.id, updates: { indexOfRefraction: Math.max(0.01, value) } },
-              });
-            }
-          }}
-          onKeyDown={(event) =>
-            handleCaretStepKeyDown(event, (value) => {
-              event.stopPropagation();
-              dispatch({
-                type: 'UPDATE_COMPONENT',
-                payload: { id: component.id, updates: { indexOfRefraction: Math.max(0.01, value) } },
-              });
+          value={component.indexOfRefraction}
+          onCommit={(value) =>
+            dispatch({
+              type: 'UPDATE_COMPONENT',
+              payload: { id: component.id, updates: { indexOfRefraction: Math.max(0.01, value) } },
             })
           }
         />
       </PropField>
     );
+
+    if (!isSelected) {
+      return indexField;
+    }
+
+    return (
+      <div className="property-cell-stack">
+        {indexField}
+        <PropField key="t" prefix="t=" suffix="mm">
+          <NumericField
+            disabled={component.locked}
+            value={component.thickness}
+            onCommit={(value) =>
+              dispatch({
+                type: 'UPDATE_COMPONENT',
+                payload: { id: component.id, updates: { thickness: Math.max(0.001, round3(value)) } },
+              })
+            }
+          />
+        </PropField>
+      </div>
+    );
   }
 
-  return (
-    <PropField prefix="L=" suffix="mm">
-      <input
-        type="text"
-        inputMode="decimal"
+  // Only cavity_fp remains.
+  const lengthField = (
+    <PropField key="L" prefix="L=" suffix="mm">
+      <NumericField
         disabled={component.locked}
-        value={formatFixed3(component.length)}
-        onChange={(event) => {
-          event.stopPropagation();
-          const value = Number(event.target.value);
-          if (Number.isFinite(value)) {
-            dispatch({
-              type: 'UPDATE_COMPONENT',
-              payload: { id: component.id, updates: { length: Math.max(1, value) } },
-            });
-          }
-        }}
-        onKeyDown={(event) =>
-          handleCaretStepKeyDown(event, (value) => {
-            event.stopPropagation();
-            dispatch({
-              type: 'UPDATE_COMPONENT',
-              payload: { id: component.id, updates: { length: Math.max(1, value) } },
-            });
+        value={component.length}
+        onCommit={(value) =>
+          dispatch({
+            type: 'UPDATE_COMPONENT',
+            payload: { id: component.id, updates: { length: Math.max(1, value) } },
           })
         }
       />
     </PropField>
   );
+
+  if (!isSelected) {
+    return lengthField;
+  }
+
+  return (
+    <div className="property-cell-stack">
+      {lengthField}
+      <PropField key="r1" prefix="R1=" suffix="mm">
+        <NumericField
+          disabled={component.locked}
+          value={component.r1}
+          parse={parseCavityRadius}
+          placeholder="Infinity"
+          onCommit={(value) =>
+            dispatch({
+              type: 'UPDATE_COMPONENT',
+              payload: { id: component.id, updates: { r1: Number.isFinite(value) ? round3(value) : value } },
+            })
+          }
+        />
+      </PropField>
+      <PropField key="r2" prefix="R2=" suffix="mm">
+        <NumericField
+          disabled={component.locked}
+          value={component.r2}
+          parse={parseCavityRadius}
+          placeholder="Infinity"
+          onCommit={(value) =>
+            dispatch({
+              type: 'UPDATE_COMPONENT',
+              payload: { id: component.id, updates: { r2: Number.isFinite(value) ? round3(value) : value } },
+            })
+          }
+        />
+      </PropField>
+    </div>
+  );
+}
+
+function round3(value: number): number {
+  return Math.round(value * 1000) / 1000;
 }
 
 function shortKind(kind: OpticalComponent['kind']) {

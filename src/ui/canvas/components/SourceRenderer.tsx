@@ -11,6 +11,8 @@ import React, { useRef } from 'react';
 import { Circle, Group, Line, Text } from 'react-konva';
 import type Konva from 'konva';
 import type { CardinalDirection, Point2d, SourceComponent } from '../../../app/state/schema';
+import { useTheme } from '../../../app/adapters/useTheme';
+import { getCanvasColors } from '../canvasTheme';
 
 interface SourceRendererProps {
   component: SourceComponent;
@@ -44,6 +46,8 @@ export const SourceRenderer: React.FC<SourceRendererProps> = ({
   getSnappedDragPositionPx,
 }) => {
   const groupRef = useRef<Konva.Group>(null);
+  const { theme } = useTheme();
+  const colors = getCanvasColors(theme);
 
   const x = mmToPx(component.position.x);
   const y = mmToPx(component.position.y);
@@ -151,7 +155,7 @@ export const SourceRenderer: React.FC<SourceRendererProps> = ({
         y={labelAnchor.y - 6}
         text={component.label}
         fontSize={12}
-        fill="#333"
+        fill={colors.label}
         pointerEvents="none"
       />
     </Group>

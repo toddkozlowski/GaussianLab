@@ -183,15 +183,6 @@ export function computeDangerousPairs(
   return pairs;
 }
 
-export function moveLensToPathZ(state: AppState, lensId: string, zMm: number): Point2d | null {
-  const lens = state.components[lensId];
-  if (!lens || lens.kind !== 'lens_thin') {
-    return null;
-  }
-
-  return pointOnBeamPathAtZ(state.beamPath, zMm);
-}
-
 /**
  * Resolves the (x, y) a component would sit at if slid to a given z along
  * the beam path. Mirrors are excluded: repositioning one also changes the

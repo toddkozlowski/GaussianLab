@@ -65,6 +65,14 @@ export function appStateReducer(state: AppState, action: AppAction): AppState {
 
     case 'REMOVE_COMPONENT': {
       const { id } = action.payload;
+
+      // Only one beam source is supported at a time for now, so the
+      // starting source can't be deleted - there would be nothing left to
+      // build a beam path from. Revisit once multi-source support lands.
+      if (state.components[id]?.kind === 'source') {
+        return state;
+      }
+
       const { [id]: removed, ...remaining } = state.components;
 
       // If the removed component was the source, clear sourceId

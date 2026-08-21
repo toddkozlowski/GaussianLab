@@ -9,6 +9,8 @@ import React, { useRef } from 'react';
 import { Circle, Group, Text } from 'react-konva';
 import type Konva from 'konva';
 import type { Point2d, TargetComponent } from '../../../app/state/schema';
+import { useTheme } from '../../../app/adapters/useTheme';
+import { getCanvasColors } from '../canvasTheme';
 
 interface TargetRendererProps {
   component: TargetComponent;
@@ -32,6 +34,8 @@ export const TargetRenderer: React.FC<TargetRendererProps> = ({
   getSnappedDragPositionPx,
 }) => {
   const groupRef = useRef<Konva.Group>(null);
+  const { theme } = useTheme();
+  const colors = getCanvasColors(theme);
 
   const x = mmToPx(component.position.x);
   const y = mmToPx(component.position.y);
@@ -89,7 +93,7 @@ export const TargetRenderer: React.FC<TargetRendererProps> = ({
         y={-outerRadius}
         text={component.label}
         fontSize={12}
-        fill="#333"
+        fill={colors.label}
         pointerEvents="none"
       />
       <Text
@@ -97,7 +101,7 @@ export const TargetRenderer: React.FC<TargetRendererProps> = ({
         y={-outerRadius + 14}
         text={`w0=${waistLabel}`}
         fontSize={10}
-        fill="#666"
+        fill={colors.labelSecondary}
         pointerEvents="none"
       />
     </Group>

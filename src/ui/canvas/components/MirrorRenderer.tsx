@@ -12,6 +12,8 @@ import React, { useRef } from 'react';
 import { Line, Text, Group } from 'react-konva';
 import type Konva from 'konva';
 import type { FlatMirrorComponent, MirrorOrientation, Point2d } from '../../../app/state/schema';
+import { useTheme } from '../../../app/adapters/useTheme';
+import { getCanvasColors } from '../canvasTheme';
 
 interface MirrorRendererProps {
   component: FlatMirrorComponent;
@@ -28,7 +30,9 @@ interface MirrorRendererProps {
 // orientation. Derived from the reflection table in beamPathResolver.ts:
 // the reflective face must point back toward every valid incoming
 // direction for that orientation, so the substrate sits on the far side.
-const SUBSTRATE_DIRECTION: Record<MirrorOrientation, { x: number; y: number }> = {
+// Exported so Sidebar.test.tsx can verify a new mirror's default orientation
+// actually presents its coating (not its substrate/back) to the beam.
+export const SUBSTRATE_DIRECTION: Record<MirrorOrientation, { x: number; y: number }> = {
   45: { x: 1, y: 1 },
   135: { x: 1, y: -1 },
   225: { x: -1, y: -1 },
@@ -47,6 +51,8 @@ export const MirrorRenderer: React.FC<MirrorRendererProps> = ({
 }) => {
   const lineRef = useRef<Konva.Line>(null);
   const groupRef = useRef<Konva.Group>(null);
+  const { theme } = useTheme();
+  const colors = getCanvasColors(theme);
 
   const x = mmToPx(component.position.x);
   const y = mmToPx(component.position.y);
@@ -113,7 +119,7 @@ export const MirrorRenderer: React.FC<MirrorRendererProps> = ({
         ]}
         closed
         fill={isSelected ? '#cfd8e3' : '#b7c2cf'}
-        stroke={isSelected ? '#1f6feb' : '#5b6b7a'}
+        stroke={isSelected ? '#1f6feb' : colors.neutralLine}
         strokeWidth={isSelected ? 2 : 1.5}
       />
       {/* Reflective coating: the front face, exactly at component.position */}
@@ -129,7 +135,7 @@ export const MirrorRenderer: React.FC<MirrorRendererProps> = ({
         y={dy - 8}
         text={component.label}
         fontSize={12}
-        fill="#333"
+        fill={colors.label}
         pointerEvents="none"
       />
     </Group>

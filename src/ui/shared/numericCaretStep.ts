@@ -1,5 +1,3 @@
-import type React from 'react';
-
 interface StepResult {
   value: string;
   caret: number;
@@ -69,37 +67,4 @@ export function stepNumericStringAtCaret(rawText: string, caret: number, directi
   const nextText = formatWithOriginalSeparator(nextValue, decimals, separator);
   const nextCaret = Math.min(caret, nextText.length);
   return { value: nextText, caret: nextCaret };
-}
-
-export function handleCaretStepKeyDown(
-  event: React.KeyboardEvent<HTMLInputElement>,
-  onNumericValue: (value: number) => void,
-): void {
-  if (event.key !== 'ArrowUp' && event.key !== 'ArrowDown') {
-    return;
-  }
-
-  event.preventDefault();
-  const input = event.currentTarget;
-  const caret = input.selectionStart ?? input.value.length;
-  const direction: 1 | -1 = event.key === 'ArrowUp' ? 1 : -1;
-  const next = stepNumericStringAtCaret(input.value, caret, direction);
-  if (!next) {
-    return;
-  }
-
-  const value = toNumber(next.value);
-  if (value === null) {
-    return;
-  }
-
-  onNumericValue(value);
-
-  window.requestAnimationFrame(() => {
-    try {
-      input.setSelectionRange(next.caret, next.caret);
-    } catch {
-      // Selection APIs may not be available for all browsers/input modes.
-    }
-  });
 }

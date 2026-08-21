@@ -387,4 +387,32 @@ describe('beamPathResolver', () => {
     expect(path!.segments[0].terminatedByComponentId).toBe(beamStop.id);
     expect(path!.segments[0].termination).toBe('component');
   });
+
+  it('stays valid with more than 20 pass-through components on the path', () => {
+    const source = createSourceComponent();
+    source.position = { x: 20, y: 300 };
+    source.direction = 'right';
+
+    const components: AppState['components'] = { [source.id]: source };
+    const lensCount = 25;
+    for (let i = 0; i < lensCount; i += 1) {
+      const lens = createLensThinComponent(components, { x: 40 + i * 20, y: 300 });
+      components[lens.id] = lens;
+    }
+
+    const state: AppState = {
+      ...DEFAULT_APP_STATE,
+      sourceId: source.id,
+      components,
+      table: { ...DEFAULT_APP_STATE.table, width: 1000 },
+    };
+
+    const path = resolveBeamPath(state);
+    expect(path).not.toBeNull();
+    expect(path!.isValid).toBe(true);
+    expect(path!.invalidReason).toBeNull();
+    expect(path!.orderedComponentIds).toHaveLength(lensCount);
+    expect(path!.segments).toHaveLength(lensCount + 1); // one per lens, plus the final run to the table boundary
+    expect(path!.segments[path!.segments.length - 1].termination).toBe('table_boundary');
+  });
 });

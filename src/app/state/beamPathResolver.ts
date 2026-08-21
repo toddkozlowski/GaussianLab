@@ -82,9 +82,17 @@ function traceBeamPath(
   let totalZ = 0;
 
   const visited = new Set<string>([source.id]);
-  const MAX_REFLECTIONS = 20; // Prevent infinite loops
+  // findNextComponentAlongRay skips anything already in `visited`, so a
+  // component can be hit at most once per trace - a real infinite loop
+  // (e.g. bouncing between two mirrors forever) is already structurally
+  // impossible. This just bounds the loop against that invariant somehow
+  // being violated, so it should never actually trigger for a legitimate
+  // path - sizing it off the table's own component count (rather than a
+  // fixed constant) means it never artificially truncates a path just for
+  // having a lot of components on the table.
+  const MAX_SEGMENTS = Object.keys(components).length + 1;
 
-  while (segments.length < MAX_REFLECTIONS) {
+  while (segments.length < MAX_SEGMENTS) {
     // Step 1: Find the next component along the current direction
     const { component, hitPoint, distance } = findNextComponentAlongRay(
       currentPos,
@@ -200,7 +208,7 @@ function traceBeamPath(
     segments,
     orderedComponentIds,
     totalLength: totalZ,
-    invalidReason: 'Maximum reflections exceeded (infinite loop?)',
+    invalidReason: 'Beam path exceeded the table\'s component count without terminating (infinite loop?)',
   };
 }
 

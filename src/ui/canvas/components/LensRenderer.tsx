@@ -6,6 +6,8 @@ import React, { useRef } from 'react';
 import { Rect, Text } from 'react-konva';
 import Konva from 'konva';
 import type { CardinalDirection, LensThinComponent, Point2d } from '../../../app/state/schema';
+import { useTheme } from '../../../app/adapters/useTheme';
+import { getCanvasColors } from '../canvasTheme';
 
 interface LensRendererProps {
   component: LensThinComponent;
@@ -31,6 +33,8 @@ export const LensRenderer: React.FC<LensRendererProps> = ({
   getSnappedDragPositionPx,
 }) => {
   const rectRef = useRef<Konva.Rect>(null);
+  const { theme } = useTheme();
+  const colors = getCanvasColors(theme);
 
   const x = mmToPx(component.position.x);
   const y = mmToPx(component.position.y);
@@ -83,7 +87,7 @@ export const LensRenderer: React.FC<LensRendererProps> = ({
         y={y - 8}
         text={component.label}
         fontSize={12}
-        fill="#333"
+        fill={colors.label}
         pointerEvents="none"
       />
       <Text
@@ -91,7 +95,7 @@ export const LensRenderer: React.FC<LensRendererProps> = ({
         y={y + 6}
         text={`f=${component.focalLength.toFixed(0)}mm`}
         fontSize={10}
-        fill="#666"
+        fill={colors.labelSecondary}
         pointerEvents="none"
       />
     </>

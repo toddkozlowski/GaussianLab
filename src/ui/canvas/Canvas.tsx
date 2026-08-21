@@ -31,7 +31,8 @@ import { GridOverlay } from './GridOverlay';
 import { BeamCorridorOverlay } from './BeamCorridorOverlay';
 import { TuningRangeOverlay } from './TuningRangeOverlay';
 import { snapPointToGrid, gridSpacingMm } from '../../app/state/snapToGrid';
-import { handleCaretStepKeyDown } from '../shared/numericCaretStep';
+import { parseCavityRadius } from '../../app/state/cavityRadius';
+import { NumericField } from '../shared/NumericField';
 import lockIcon from '../../../icons/lock.svg';
 import lockOpenIcon from '../../../icons/lock-open.svg';
 import eyeIcon from '../../../icons/eye.svg';
@@ -564,9 +565,11 @@ export const Canvas: React.FC<CanvasProps> = ({
               >
                 <img className="icon-glyph" src={selected.locked ? lockIcon : lockOpenIcon} alt="" />
               </button>
-              <button type="button" className="icon-button danger-button" aria-label="Delete component" onClick={deleteSelected}>
-                <img className="icon-glyph" src={trashIcon} alt="" />
-              </button>
+              {selected.kind !== 'source' && (
+                <button type="button" className="icon-button danger-button" aria-label="Delete component" onClick={deleteSelected}>
+                  <img className="icon-glyph" src={trashIcon} alt="" />
+                </button>
+              )}
             </div>
           </div>
           <label>
@@ -584,30 +587,16 @@ export const Canvas: React.FC<CanvasProps> = ({
           <div className="canvas-selection-grid">
             <label>
               X (mm)
-              <input
-                type="text"
-                inputMode="decimal"
-                value={formatFixed3(selected.position.x)}
-                onChange={(event) => updateCanvasPosition(dispatch, config, selected.id, selected.position, 'x', Number(event.target.value))}
-                onKeyDown={(event) =>
-                  handleCaretStepKeyDown(event, (value) =>
-                    updateCanvasPosition(dispatch, config, selected.id, selected.position, 'x', value),
-                  )
-                }
+              <NumericField
+                value={selected.position.x}
+                onCommit={(value) => updateCanvasPosition(dispatch, config, selected.id, selected.position, 'x', value)}
               />
             </label>
             <label>
               Y (mm)
-              <input
-                type="text"
-                inputMode="decimal"
-                value={formatFixed3(selected.position.y)}
-                onChange={(event) => updateCanvasPosition(dispatch, config, selected.id, selected.position, 'y', Number(event.target.value))}
-                onKeyDown={(event) =>
-                  handleCaretStepKeyDown(event, (value) =>
-                    updateCanvasPosition(dispatch, config, selected.id, selected.position, 'y', value),
-                  )
-                }
+              <NumericField
+                value={selected.position.y}
+                onCommit={(value) => updateCanvasPosition(dispatch, config, selected.id, selected.position, 'y', value)}
               />
             </label>
           </div>
@@ -630,96 +619,46 @@ export const Canvas: React.FC<CanvasProps> = ({
             <div className="canvas-source-editor">
               <label>
                 Waist r (um)
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  step={1}
-                  value={Math.round(selected.waistRadius * 1000)}
-                  onChange={(event) => {
-                    const value = Number(event.target.value);
-                    if (Number.isFinite(value)) {
-                      dispatch({
-                        type: 'UPDATE_COMPONENT',
-                        payload: {
-                          id: selected.id,
-                          updates: { waistRadius: Math.max(1, value) / 1000 },
-                        },
-                      });
-                    }
-                  }}
-                  onKeyDown={(event) =>
-                    handleCaretStepKeyDown(event, (value) => {
-                      dispatch({
-                        type: 'UPDATE_COMPONENT',
-                        payload: {
-                          id: selected.id,
-                          updates: { waistRadius: Math.max(1, value) / 1000 },
-                        },
-                      });
+                <NumericField
+                  value={selected.waistRadius * 1000}
+                  format={(value) => String(Math.round(value))}
+                  onCommit={(value) =>
+                    dispatch({
+                      type: 'UPDATE_COMPONENT',
+                      payload: {
+                        id: selected.id,
+                        updates: { waistRadius: Math.max(1, value) / 1000 },
+                      },
                     })
                   }
                 />
               </label>
               <label>
                 Waist z (mm)
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  step={0.1}
-                  value={formatFixed3(selected.waistOffset)}
-                  onChange={(event) => {
-                    const value = Number(event.target.value);
-                    if (Number.isFinite(value)) {
-                      dispatch({
-                        type: 'UPDATE_COMPONENT',
-                        payload: {
-                          id: selected.id,
-                          updates: { waistOffset: round3(value) },
-                        },
-                      });
-                    }
-                  }}
-                  onKeyDown={(event) =>
-                    handleCaretStepKeyDown(event, (value) => {
-                      dispatch({
-                        type: 'UPDATE_COMPONENT',
-                        payload: {
-                          id: selected.id,
-                          updates: { waistOffset: round3(value) },
-                        },
-                      });
+                <NumericField
+                  value={selected.waistOffset}
+                  onCommit={(value) =>
+                    dispatch({
+                      type: 'UPDATE_COMPONENT',
+                      payload: {
+                        id: selected.id,
+                        updates: { waistOffset: round3(value) },
+                      },
                     })
                   }
                 />
               </label>
               <label>
                 lambda (nm)
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  step={1}
-                  value={formatFixed3(selected.wavelength)}
-                  onChange={(event) => {
-                    const value = Number(event.target.value);
-                    if (Number.isFinite(value)) {
-                      dispatch({
-                        type: 'UPDATE_COMPONENT',
-                        payload: {
-                          id: selected.id,
-                          updates: { wavelength: Math.max(1, value) },
-                        },
-                      });
-                    }
-                  }}
-                  onKeyDown={(event) =>
-                    handleCaretStepKeyDown(event, (value) => {
-                      dispatch({
-                        type: 'UPDATE_COMPONENT',
-                        payload: {
-                          id: selected.id,
-                          updates: { wavelength: Math.max(1, value) },
-                        },
-                      });
+                <NumericField
+                  value={selected.wavelength}
+                  onCommit={(value) =>
+                    dispatch({
+                      type: 'UPDATE_COMPONENT',
+                      payload: {
+                        id: selected.id,
+                        updates: { wavelength: Math.max(1, value) },
+                      },
                     })
                   }
                 />
@@ -731,25 +670,12 @@ export const Canvas: React.FC<CanvasProps> = ({
             <div className="canvas-source-editor">
               <label>
                 Focal length (mm)
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  value={formatFixed3(selected.focalLength)}
-                  onChange={(event) => {
-                    const value = Number(event.target.value);
-                    if (Number.isFinite(value)) {
-                      dispatch({
-                        type: 'UPDATE_COMPONENT',
-                        payload: { id: selected.id, updates: { focalLength: round3(value) } },
-                      });
-                    }
-                  }}
-                  onKeyDown={(event) =>
-                    handleCaretStepKeyDown(event, (value) => {
-                      dispatch({
-                        type: 'UPDATE_COMPONENT',
-                        payload: { id: selected.id, updates: { focalLength: round3(value) } },
-                      });
+                <NumericField
+                  value={selected.focalLength}
+                  onCommit={(value) =>
+                    dispatch({
+                      type: 'UPDATE_COMPONENT',
+                      payload: { id: selected.id, updates: { focalLength: round3(value) } },
                     })
                   }
                 />
@@ -761,50 +687,24 @@ export const Canvas: React.FC<CanvasProps> = ({
             <div className="canvas-source-editor">
               <label>
                 Index of refraction
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  value={formatFixed3(selected.indexOfRefraction)}
-                  onChange={(event) => {
-                    const value = Number(event.target.value);
-                    if (Number.isFinite(value)) {
-                      dispatch({
-                        type: 'UPDATE_COMPONENT',
-                        payload: { id: selected.id, updates: { indexOfRefraction: Math.max(0.01, round3(value)) } },
-                      });
-                    }
-                  }}
-                  onKeyDown={(event) =>
-                    handleCaretStepKeyDown(event, (value) => {
-                      dispatch({
-                        type: 'UPDATE_COMPONENT',
-                        payload: { id: selected.id, updates: { indexOfRefraction: Math.max(0.01, round3(value)) } },
-                      });
+                <NumericField
+                  value={selected.indexOfRefraction}
+                  onCommit={(value) =>
+                    dispatch({
+                      type: 'UPDATE_COMPONENT',
+                      payload: { id: selected.id, updates: { indexOfRefraction: Math.max(0.01, round3(value)) } },
                     })
                   }
                 />
               </label>
               <label>
                 Thickness (mm)
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  value={formatFixed3(selected.thickness)}
-                  onChange={(event) => {
-                    const value = Number(event.target.value);
-                    if (Number.isFinite(value)) {
-                      dispatch({
-                        type: 'UPDATE_COMPONENT',
-                        payload: { id: selected.id, updates: { thickness: Math.max(0.001, round3(value)) } },
-                      });
-                    }
-                  }}
-                  onKeyDown={(event) =>
-                    handleCaretStepKeyDown(event, (value) => {
-                      dispatch({
-                        type: 'UPDATE_COMPONENT',
-                        payload: { id: selected.id, updates: { thickness: Math.max(0.001, round3(value)) } },
-                      });
+                <NumericField
+                  value={selected.thickness}
+                  onCommit={(value) =>
+                    dispatch({
+                      type: 'UPDATE_COMPONENT',
+                      payload: { id: selected.id, updates: { thickness: Math.max(0.001, round3(value)) } },
                     })
                   }
                 />
@@ -816,25 +716,13 @@ export const Canvas: React.FC<CanvasProps> = ({
             <div className="canvas-source-editor">
               <label>
                 Waist r (um)
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  value={Math.round(selected.waistRadius * 1000)}
-                  onChange={(event) => {
-                    const value = Number(event.target.value);
-                    if (Number.isFinite(value)) {
-                      dispatch({
-                        type: 'UPDATE_COMPONENT',
-                        payload: { id: selected.id, updates: { waistRadius: Math.max(1, value) / 1000 } },
-                      });
-                    }
-                  }}
-                  onKeyDown={(event) =>
-                    handleCaretStepKeyDown(event, (value) => {
-                      dispatch({
-                        type: 'UPDATE_COMPONENT',
-                        payload: { id: selected.id, updates: { waistRadius: Math.max(1, value) / 1000 } },
-                      });
+                <NumericField
+                  value={selected.waistRadius * 1000}
+                  format={(value) => String(Math.round(value))}
+                  onCommit={(value) =>
+                    dispatch({
+                      type: 'UPDATE_COMPONENT',
+                      payload: { id: selected.id, updates: { waistRadius: Math.max(1, value) / 1000 } },
                     })
                   }
                 />
@@ -872,25 +760,12 @@ export const Canvas: React.FC<CanvasProps> = ({
               <div className="canvas-source-editor">
                 <label>
                   Length (mm)
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    value={formatFixed3(selected.length)}
-                    onChange={(event) => {
-                      const value = Number(event.target.value);
-                      if (Number.isFinite(value)) {
-                        dispatch({
-                          type: 'UPDATE_COMPONENT',
-                          payload: { id: selected.id, updates: { length: round3(Math.max(1, value)) } },
-                        });
-                      }
-                    }}
-                    onKeyDown={(event) =>
-                      handleCaretStepKeyDown(event, (value) => {
-                        dispatch({
-                          type: 'UPDATE_COMPONENT',
-                          payload: { id: selected.id, updates: { length: round3(Math.max(1, value)) } },
-                        });
+                  <NumericField
+                    value={selected.length}
+                    onCommit={(value) =>
+                      dispatch({
+                        type: 'UPDATE_COMPONENT',
+                        payload: { id: selected.id, updates: { length: round3(Math.max(1, value)) } },
                       })
                     }
                   />
@@ -899,23 +774,19 @@ export const Canvas: React.FC<CanvasProps> = ({
                   <label>
                     RoC1 (mm)
                     <div className="canvas-radius-row">
-                      <input
-                        type="text"
-                        inputMode="decimal"
+                      <NumericField
                         className="canvas-radius-input"
-                        value={Number.isFinite(selected.r1) ? formatFixed3(selected.r1) : ''}
+                        value={selected.r1}
+                        parse={parseCavityRadius}
                         placeholder="Infinity"
-                        onChange={(event) => updateCavityRadius(dispatch, selected.id, 'r1', event.target.value)}
-                        onKeyDown={(event) =>
-                          handleCaretStepKeyDown(event, (value) => updateCavityRadius(dispatch, selected.id, 'r1', String(value)))
-                        }
+                        onCommit={(value) => updateCavityRadius(dispatch, selected.id, 'r1', value)}
                       />
                       <label className="canvas-radius-flat-toggle">
                         <input
                           type="checkbox"
                           checked={!Number.isFinite(selected.r1)}
                           onChange={(event) =>
-                            updateCavityRadius(dispatch, selected.id, 'r1', event.target.checked ? '' : '100')
+                            updateCavityRadius(dispatch, selected.id, 'r1', event.target.checked ? Number.POSITIVE_INFINITY : 100)
                           }
                         />
                         flat
@@ -925,23 +796,19 @@ export const Canvas: React.FC<CanvasProps> = ({
                   <label>
                     RoC2 (mm)
                     <div className="canvas-radius-row">
-                      <input
-                        type="text"
-                        inputMode="decimal"
+                      <NumericField
                         className="canvas-radius-input"
-                        value={Number.isFinite(selected.r2) ? formatFixed3(selected.r2) : ''}
+                        value={selected.r2}
+                        parse={parseCavityRadius}
                         placeholder="Infinity"
-                        onChange={(event) => updateCavityRadius(dispatch, selected.id, 'r2', event.target.value)}
-                        onKeyDown={(event) =>
-                          handleCaretStepKeyDown(event, (value) => updateCavityRadius(dispatch, selected.id, 'r2', String(value)))
-                        }
+                        onCommit={(value) => updateCavityRadius(dispatch, selected.id, 'r2', value)}
                       />
                       <label className="canvas-radius-flat-toggle">
                         <input
                           type="checkbox"
                           checked={!Number.isFinite(selected.r2)}
                           onChange={(event) =>
-                            updateCavityRadius(dispatch, selected.id, 'r2', event.target.checked ? '' : '100')
+                            updateCavityRadius(dispatch, selected.id, 'r2', event.target.checked ? Number.POSITIVE_INFINITY : 100)
                           }
                         />
                         flat
@@ -1060,32 +927,12 @@ function updateCavityRadius(
   dispatch: ReturnType<typeof useAppStore>['dispatch'],
   componentId: string,
   key: 'r1' | 'r2',
-  rawValue: string
+  value: number
 ) {
-  if (rawValue.trim() === '') {
-    dispatch({
-      type: 'UPDATE_COMPONENT',
-      payload: { id: componentId, updates: { [key]: Number.POSITIVE_INFINITY } },
-    });
-    return;
-  }
-
-  const value = Number(rawValue);
-  if (!Number.isFinite(value)) {
-    return;
-  }
-
   dispatch({
     type: 'UPDATE_COMPONENT',
-    payload: { id: componentId, updates: { [key]: round3(value) } },
+    payload: { id: componentId, updates: { [key]: Number.isFinite(value) ? round3(value) : value } },
   });
-}
-
-function formatFixed3(value: number): string {
-  if (!Number.isFinite(value)) {
-    return '';
-  }
-  return value.toFixed(3);
 }
 
 function round3(value: number): number {

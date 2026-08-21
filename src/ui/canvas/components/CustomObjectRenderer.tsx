@@ -9,6 +9,8 @@ import React, { useRef } from 'react';
 import { Group, Line, Text } from 'react-konva';
 import type Konva from 'konva';
 import type { CardinalDirection, CustomObjectComponent, Point2d } from '../../../app/state/schema';
+import { useTheme } from '../../../app/adapters/useTheme';
+import { getCanvasColors } from '../canvasTheme';
 
 interface CustomObjectRendererProps {
   component: CustomObjectComponent;
@@ -43,6 +45,8 @@ export const CustomObjectRenderer: React.FC<CustomObjectRendererProps> = ({
   getSnappedDragPositionPx,
 }) => {
   const groupRef = useRef<Konva.Group>(null);
+  const { theme } = useTheme();
+  const colors = getCanvasColors(theme);
 
   const x = mmToPx(component.position.x);
   const y = mmToPx(component.position.y);
@@ -70,7 +74,7 @@ export const CustomObjectRenderer: React.FC<CustomObjectRendererProps> = ({
   // Optically inert at n=1 (still occupies physical space, but affects no
   // propagation) - shown as a neutral gray rather than the active tint.
   const isOpticallyActive = Math.abs(component.indexOfRefraction - 1) > 1e-9;
-  const faceColor = isSelected ? '#1f6feb' : isOpticallyActive ? '#3d7ea6' : '#8a939c';
+  const faceColor = isSelected ? '#1f6feb' : isOpticallyActive ? '#3d7ea6' : colors.neutralLine;
 
   const handleDragMove = (e: Konva.KonvaEventObject<DragEvent>) => {
     if (groupRef.current) {
@@ -127,7 +131,7 @@ export const CustomObjectRenderer: React.FC<CustomObjectRendererProps> = ({
         y={labelAnchor.y - 6}
         text={component.label}
         fontSize={12}
-        fill="#333"
+        fill={colors.label}
         pointerEvents="none"
       />
     </Group>
