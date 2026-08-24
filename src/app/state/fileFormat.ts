@@ -172,6 +172,7 @@ export function serializeAppState(state: AppState): string {
         ['grid_standard', state.table.gridStandard],
         ['snap_to_grid', formatBool(state.table.snapToGrid)],
         ['axis_capture_threshold_mm', String(state.table.axisCaptureThreshold)],
+        ['min_component_spacing_mm', String(state.table.minComponentSpacingMm)],
       ],
     }),
     '',
@@ -376,6 +377,7 @@ export function parseAppState(text: string): AppState {
     gridStandard: parseGridStandard(tableSection.values.get('grid_standard')),
     snapToGrid: parseBool(tableSection.values.get('snap_to_grid'), true),
     axisCaptureThreshold: requireNumber(tableSection, 'axis_capture_threshold_mm'),
+    minComponentSpacingMm: requireNumber(tableSection, 'min_component_spacing_mm'),
   };
 
   const components: Record<string, OpticalComponent> = {};

@@ -4,8 +4,8 @@ import { optimizeGridSearch, optimizeNelderMead, defaultOptimizerConfig } from '
 import { resolveAppState } from './stateResolver';
 import { computeLiveModeOverlap } from './modeMetrics';
 import {
+  computeCavityIntrusions,
   computeDangerousPairs,
-  DANGEROUS_PROXIMITY_THRESHOLD_MM,
   getComponentMovementAxis,
   getComponentPathPosition,
   resolveZRangeExtents,
@@ -88,17 +88,17 @@ function allLensPlacementsValid(state: AppState, lensIds: string[]): boolean {
 /**
  * True if moving a lens to this trial position would trigger the same
  * "too close" proximity warning the UI flags elsewhere - i.e. it's within
- * DANGEROUS_PROXIMITY_THRESHOLD_MM of some other component. Only pairs
- * involving a movable lens matter here: the other components don't move
- * during optimization, so any collision between them is unaffected by the
- * candidate lens positions being evaluated.
+ * the table's configured minComponentSpacingMm of some other component.
+ * Only pairs involving a movable lens matter here: the other components
+ * don't move during optimization, so any collision between them is
+ * unaffected by the candidate lens positions being evaluated.
  */
 function hasLensCollision(state: AppState, lensIds: string[]): boolean {
   const dangerousPairs = computeDangerousPairs(
     state.components,
     state.sourceId,
     state.beamPath,
-    DANGEROUS_PROXIMITY_THRESHOLD_MM,
+    state.table.minComponentSpacingMm,
   );
   return dangerousPairs.some((pair) => lensIds.includes(pair.aId) || lensIds.includes(pair.bId));
 }
@@ -208,6 +208,14 @@ export function runModeMatchSolver(
   const movableLenses = getMovableLenses(state);
 
   if (!state.targetMode || movableLenses.length === 0 || movableLenses.length > MAX_OPTIMIZER_LENSES) {
+    return [];
+  }
+
+  // A component sitting inside a cavity's mirror span makes the table
+  // physically invalid - refuse to run rather than optimise against a
+  // meaningless (always-null) overlap score. The UI surfaces this as a
+  // blocking error rather than a silent empty result.
+  if (computeCavityIntrusions(state.components, state.sourceId, state.beamPath).length > 0) {
     return [];
   }
 

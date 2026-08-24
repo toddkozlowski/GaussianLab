@@ -280,6 +280,61 @@ describe('runModeMatchSolver avoidCollisions toggle', () => {
     const closestWithout = Math.min(...withoutAvoidance.map(distanceToObstacle));
     expect(closestWithout).toBeLessThan(10);
   });
+
+  it('honors the table\'s configured minComponentSpacingMm, not a hardcoded threshold', () => {
+    const source = createSourceComponent({}, { x: 50, y: 300 });
+    const lens = createLensThinComponent({}, { x: 250, y: 300 });
+    const target = createTargetComponent({}, { x: 600, y: 300 });
+    target.waistRadius = 0.3;
+
+    let baseState: AppState = {
+      ...DEFAULT_APP_STATE,
+      sourceId: source.id,
+      components: { [source.id]: source, [lens.id]: lens, [target.id]: target },
+      targetMode: { kind: 'target', targetComponentId: target.id },
+      optimiser: { ...DEFAULT_APP_STATE.optimiser, avoidCollisions: false },
+    };
+    baseState = resolveAppState(baseState, engine, cavitySolver);
+
+    const baseline = runModeMatchSolver(baseState, engine, 5);
+    expect(baseline.length).toBeGreaterThan(0);
+    const bestPosition = baseline[0].lensPositions[lens.id];
+
+    const obstacle = createTargetComponent({}, { ...bestPosition });
+    let obstructedState: AppState = {
+      ...baseState,
+      optimiser: { ...baseState.optimiser, avoidCollisions: true },
+      components: { ...baseState.components, [obstacle.id]: obstacle },
+    };
+    obstructedState = resolveAppState(obstructedState, engine, cavitySolver);
+
+    const distanceToObstacle = (solution: OptimiserSolution) =>
+      Math.hypot(
+        solution.lensPositions[lens.id].x - obstacle.position.x,
+        solution.lensPositions[lens.id].y - obstacle.position.y,
+      );
+
+    // A much wider configured spacing pushes solutions further away...
+    const wideSpacingState: AppState = {
+      ...obstructedState,
+      table: { ...obstructedState.table, minComponentSpacingMm: 30 },
+    };
+    const wideSolutions = runModeMatchSolver(wideSpacingState, engine, 5);
+    expect(wideSolutions.length).toBeGreaterThan(0);
+    for (const solution of wideSolutions) {
+      expect(distanceToObstacle(solution)).toBeGreaterThanOrEqual(30);
+    }
+
+    // ...while a spacing of exactly 0 disables the check entirely, allowing
+    // the optimum to land right on top of the obstacle again.
+    const zeroSpacingState: AppState = {
+      ...obstructedState,
+      table: { ...obstructedState.table, minComponentSpacingMm: 0 },
+    };
+    const zeroSolutions = runModeMatchSolver(zeroSpacingState, engine, 5);
+    expect(zeroSolutions.length).toBeGreaterThan(0);
+    expect(Math.min(...zeroSolutions.map(distanceToObstacle))).toBeLessThan(1);
+  });
 });
 
 describe('runModeMatchSolver manual adjustment ranges', () => {
@@ -514,6 +569,36 @@ describe('runModeMatchSolver lens count cap', () => {
     expect(getMovableLenses(state).length).toBe(MAX_OPTIMIZER_LENSES);
     const solutions = runModeMatchSolver(state, engine, 5);
     expect(solutions.length).toBeGreaterThan(0);
+  });
+});
+
+describe('runModeMatchSolver cavity intrusion guard', () => {
+  it('refuses to run while a component sits inside a cavity\'s mirror span', () => {
+    const source = createSourceComponent({}, { x: 0, y: 300 });
+    const cavity = createCavityFPComponent({}, { x: 100, y: 300 });
+    cavity.length = 100; // M1=100, M2=200
+    // Intrudes into the cavity's [100, 200] span.
+    const intrudingLens = createLensThinComponent({}, { x: 150, y: 300 });
+    // A separate, otherwise-legitimate movable lens elsewhere on the path.
+    const movableLens = createLensThinComponent({}, { x: 400, y: 300 });
+    const target = createTargetComponent({}, { x: 900, y: 300 });
+    target.waistRadius = 0.3;
+
+    let state: AppState = {
+      ...DEFAULT_APP_STATE,
+      sourceId: source.id,
+      components: {
+        [source.id]: source,
+        [cavity.id]: cavity,
+        [intrudingLens.id]: intrudingLens,
+        [movableLens.id]: movableLens,
+        [target.id]: target,
+      },
+      targetMode: { kind: 'target', targetComponentId: target.id },
+    };
+    state = resolveAppState(state, engine, cavitySolver);
+
+    expect(runModeMatchSolver(state, engine, 5)).toEqual([]);
   });
 });
 

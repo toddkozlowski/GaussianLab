@@ -51,6 +51,7 @@ function buildRichState(): AppState {
       gridStandard: 'imperial',
       snapToGrid: false,
       axisCaptureThreshold: 12.5,
+      minComponentSpacingMm: 15,
     },
     sourceId: source.id,
     components: {

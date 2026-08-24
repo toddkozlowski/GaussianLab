@@ -1,4 +1,5 @@
 import type { AppState, OptimiserState, TableConfig } from './schema';
+import { DEFAULT_MIN_COMPONENT_SPACING_MM } from './pathUtils';
 
 export const DEFAULT_TABLE_CONFIG: TableConfig = {
   width: 1000,
@@ -6,6 +7,7 @@ export const DEFAULT_TABLE_CONFIG: TableConfig = {
   gridStandard: 'metric',
   snapToGrid: true,
   axisCaptureThreshold: 10,
+  minComponentSpacingMm: DEFAULT_MIN_COMPONENT_SPACING_MM,
 };
 
 export const DEFAULT_OPTIMISER_STATE: OptimiserState = {

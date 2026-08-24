@@ -38,6 +38,13 @@
   --chart-neutral-line: #8ca0b5;
   --chart-marker-ring: #ffffff;
 
+  /* Warning icons are inline SVGs colored via currentColor (see
+     WarningTriangleIcon in Sidebar.tsx) rather than <img src="...svg">,
+     which can't be recolored by page CSS and rendered black-on-black in
+     dark mode. One amber value reads clearly against both a light and a
+     dark button background, so it isn't redefined per-theme below. */
+  --warning-icon-color: #e0952b;
+
   color: var(--text-primary);
   background: var(--page-bg);
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -527,6 +534,11 @@ button:disabled {
   margin-top: 1px;
 }
 
+.optimizer-warning-line {
+  display: block;
+  font-weight: 650;
+}
+
 .profile-overlap-chip {
   display: inline-flex;
   align-items: center;
@@ -942,6 +954,10 @@ button:disabled {
 
 .lock-icon-locked {
   color: #c0392b;
+}
+
+.warning-icon-glyph {
+  color: var(--warning-icon-color);
 }
 
 .danger-button {

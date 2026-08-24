@@ -1,4 +1,5 @@
 import { calculateModeOverlapFromWaistParams } from '../../math/overlap';
+import { computeCavityIntrusions } from './pathUtils';
 import type { AppState } from './schema';
 
 interface BeamWaist {
@@ -99,6 +100,13 @@ export function getTargetBeamWaist(state: AppState): BeamWaist | null {
 }
 
 export function computeLiveModeOverlap(state: AppState): number | null {
+  // A component sitting inside a cavity's mirror span makes the table
+  // physically nonsensical - refuse to report a mode-matching figure
+  // computed against it rather than silently trusting a bogus number.
+  if (computeCavityIntrusions(state.components, state.sourceId, state.beamPath).length > 0) {
+    return null;
+  }
+
   // For a cavity target, the propagated beam downstream of the cavity is
   // *forced* onto the cavity's own eigenmode once coupling succeeds - so
   // comparing that forced output against the (identical) target mode would

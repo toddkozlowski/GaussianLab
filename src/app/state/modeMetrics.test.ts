@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { computeLiveModeOverlap } from './modeMetrics';
+import { resolveAppState } from './stateResolver';
 import {
   createSourceComponent,
   createCavityFPComponent,
@@ -172,6 +173,43 @@ describe('computeLiveModeOverlap', () => {
         waists: [],
         qAtComponent: {}, // beam never reached the target
         qFinal: { re: 0, im: 1e-3 },
+        cavityOverlap: {},
+      },
+    };
+
+    expect(computeLiveModeOverlap(state)).toBeNull();
+  });
+
+  it('returns null when a component sits inside a cavity\'s mirror span, even if the target itself is otherwise perfectly matched', () => {
+    const source = createSourceComponent({}, { x: 0, y: 300 });
+    source.wavelength = 1064;
+
+    const cavity = createCavityFPComponent({}, { x: 100, y: 300 });
+    cavity.length = 100; // M1=100, M2=200
+
+    // Intrudes into the cavity's [100, 200] mirror span.
+    const lens = createLensThinComponent({}, { x: 150, y: 300 });
+
+    const target = createTargetComponent({}, { x: 300, y: 300 });
+    target.waistRadius = 0.05;
+
+    const zR = (Math.PI * 0.05 * 0.05) / (1064e-6);
+
+    let state: AppState = {
+      ...DEFAULT_APP_STATE,
+      sourceId: source.id,
+      components: { [source.id]: source, [cavity.id]: cavity, [lens.id]: lens, [target.id]: target },
+      targetMode: { kind: 'target', targetComponentId: target.id },
+    };
+    state = resolveAppState(state);
+    state = {
+      ...state,
+      propagationResult: {
+        profile: [{ z: 300, w: 0.05, gouyPhaseDeg: 0 }],
+        waists: [],
+        // A perfect match at the target, were it not for the cavity intrusion.
+        qAtComponent: { [target.id]: { re: 0, im: zR } },
+        qFinal: { re: 0, im: zR },
         cavityOverlap: {},
       },
     };

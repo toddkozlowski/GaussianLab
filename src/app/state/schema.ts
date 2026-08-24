@@ -129,6 +129,13 @@ export interface TableConfig {
   gridStandard: GridStandard;
   snapToGrid: boolean;
   axisCaptureThreshold: number;
+  /**
+   * Minimum allowed distance (mm) between components before the "too close"
+   * proximity warning fires - also what the mode-matching optimizer treats
+   * as an invalid (colliding) lens placement when "Avoid collisions" is on.
+   * User-editable in Settings; 0 disables the check entirely.
+   */
+  minComponentSpacingMm: number;
 }
 
 export interface BeamSegment {

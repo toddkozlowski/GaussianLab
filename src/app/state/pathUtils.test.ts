@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { computeDangerousPairs, moveComponentToPathZ, resolveZRangeExtents } from './pathUtils';
+import { computeCavityIntrusions, computeDangerousPairs, moveComponentToPathZ, resolveZRangeExtents } from './pathUtils';
 import {
+  createCavityFPComponent,
   createCustomObjectComponent,
   createFlatMirrorComponent,
   createLensThinComponent,
@@ -58,6 +59,84 @@ describe('computeDangerousPairs (custom object face-awareness)', () => {
     const pairs = computeDangerousPairs(state.components, state.sourceId, state.beamPath, 10);
     const pair = pairs.find((p) => [p.aId, p.bId].includes(objectId) && [p.aId, p.bId].includes(targetId));
     expect(pair).toBeUndefined();
+  });
+});
+
+describe('computeCavityIntrusions', () => {
+  // source(0,300) --right--> cavity FP1 (M1 at x=150, length=100 => M2 at x=250)
+  function buildStateWithCavityAndComponent(componentX: number): {
+    state: AppState;
+    cavityId: string;
+    componentId: string;
+  } {
+    const source = createSourceComponent({}, { x: 0, y: 300 });
+    const cavity = createCavityFPComponent({}, { x: 150, y: 300 });
+    cavity.length = 100;
+    const lens = createLensThinComponent({}, { x: componentX, y: 300 });
+
+    const state: AppState = {
+      ...DEFAULT_APP_STATE,
+      sourceId: source.id,
+      components: { [source.id]: source, [cavity.id]: cavity, [lens.id]: lens },
+    };
+
+    return { state: resolveAppState(state), cavityId: cavity.id, componentId: lens.id };
+  }
+
+  it('flags a component sitting strictly between M1 and M2', () => {
+    const { state, cavityId, componentId } = buildStateWithCavityAndComponent(200); // inside [150, 250]
+    const intrusions = computeCavityIntrusions(state.components, state.sourceId, state.beamPath);
+    expect(intrusions).toEqual([
+      { cavityId, cavityLabel: state.components[cavityId].label, intruderId: componentId, intruderLabel: state.components[componentId].label },
+    ]);
+  });
+
+  it('does not flag a component safely downstream of M2', () => {
+    const { state } = buildStateWithCavityAndComponent(400); // well past M2 (250)
+    expect(computeCavityIntrusions(state.components, state.sourceId, state.beamPath)).toEqual([]);
+  });
+
+  it('does not flag a component exactly at M1 or M2 (the mirrors themselves)', () => {
+    // Placing the lens exactly at x=250 (M2) - the ray tracer hits the lens
+    // *before* it would matter since termination is well-defined at either
+    // boundary point, not strictly inside the span.
+    const { state } = buildStateWithCavityAndComponent(250);
+    expect(computeCavityIntrusions(state.components, state.sourceId, state.beamPath)).toEqual([]);
+  });
+
+  it('flags an intrusion that only appears once the cavity is lengthened to encompass a previously-safe component', () => {
+    const source = createSourceComponent({}, { x: 0, y: 300 });
+    const cavity = createCavityFPComponent({}, { x: 150, y: 300 });
+    cavity.length = 50; // M2 at x=200, so a component at x=220 starts out safe
+    const lens = createLensThinComponent({}, { x: 220, y: 300 });
+
+    let state: AppState = {
+      ...DEFAULT_APP_STATE,
+      sourceId: source.id,
+      components: { [source.id]: source, [cavity.id]: cavity, [lens.id]: lens },
+    };
+    state = resolveAppState(state);
+    expect(computeCavityIntrusions(state.components, state.sourceId, state.beamPath)).toEqual([]);
+
+    // Lengthen the cavity so M2 (now x=250) swallows the lens at x=220.
+    state = resolveAppState({
+      ...state,
+      components: { ...state.components, [cavity.id]: { ...cavity, length: 100 } },
+    });
+    const intrusions = computeCavityIntrusions(state.components, state.sourceId, state.beamPath);
+    expect(intrusions).toHaveLength(1);
+    expect(intrusions[0].intruderId).toBe(lens.id);
+  });
+
+  it('returns an empty array when there are no cavities', () => {
+    const source = createSourceComponent({}, { x: 0, y: 300 });
+    const lens = createLensThinComponent({}, { x: 200, y: 300 });
+    const state = resolveAppState({
+      ...DEFAULT_APP_STATE,
+      sourceId: source.id,
+      components: { [source.id]: source, [lens.id]: lens },
+    });
+    expect(computeCavityIntrusions(state.components, state.sourceId, state.beamPath)).toEqual([]);
   });
 });
 

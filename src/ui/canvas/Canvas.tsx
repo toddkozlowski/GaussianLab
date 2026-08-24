@@ -78,6 +78,10 @@ export const Canvas: React.FC<CanvasProps> = ({
   // rather than baked into mmToPx, so component geometry math stays simple.
   const [view, setView] = React.useState({ x: 0, y: 0, scale: 1 });
   const [isPanning, setIsPanning] = React.useState(false);
+  // Freezes the camera transform (pan + zoom) independent of locking
+  // individual components - defaults unlocked so existing pan/zoom behavior
+  // is unchanged until the user opts in.
+  const [viewLocked, setViewLocked] = React.useState(false);
   const source = sourceId ? components[sourceId] : null;
   const sourceComponent = source && source.kind === 'source' ? (source as SourceComponent) : null;
   const selected = state.selectedComponentId ? state.components[state.selectedComponentId] : null;
@@ -168,6 +172,9 @@ export const Canvas: React.FC<CanvasProps> = ({
 
   const handleWheel = (event: Konva.KonvaEventObject<WheelEvent>) => {
     event.evt.preventDefault();
+    if (viewLocked) {
+      return;
+    }
     const stage = stageRef.current;
     const pointer = stage?.getPointerPosition();
     if (!pointer) {
@@ -197,6 +204,9 @@ export const Canvas: React.FC<CanvasProps> = ({
     let didPan = false;
 
     const handleWindowMouseMove = (moveEvent: MouseEvent) => {
+      if (viewLocked) {
+        return;
+      }
       const dx = moveEvent.clientX - startClientX;
       const dy = moveEvent.clientY - startClientY;
       if (!didPan && (Math.abs(dx) > 3 || Math.abs(dy) > 3)) {
@@ -642,15 +652,36 @@ export const Canvas: React.FC<CanvasProps> = ({
       </Stage>
 
       <div className="canvas-zoom-controls">
-        <button type="button" className="icon-button" aria-label="Zoom out" onClick={() => zoomAround({ x: viewportSize.width / 2, y: viewportSize.height / 2 }, 1 / 1.25)}>
+        <button
+          type="button"
+          className="icon-button"
+          aria-label="Zoom out"
+          disabled={viewLocked}
+          onClick={() => zoomAround({ x: viewportSize.width / 2, y: viewportSize.height / 2 }, 1 / 1.25)}
+        >
           <img className="icon-glyph" src={zoomOutIcon} alt="" />
         </button>
         <span className="canvas-zoom-readout">{Math.round(view.scale * 100)}%</span>
-        <button type="button" className="icon-button" aria-label="Zoom in" onClick={() => zoomAround({ x: viewportSize.width / 2, y: viewportSize.height / 2 }, 1.25)}>
+        <button
+          type="button"
+          className="icon-button"
+          aria-label="Zoom in"
+          disabled={viewLocked}
+          onClick={() => zoomAround({ x: viewportSize.width / 2, y: viewportSize.height / 2 }, 1.25)}
+        >
           <img className="icon-glyph" src={zoomInIcon} alt="" />
         </button>
         <button type="button" className="icon-button" aria-label="Reset view" title="Reset view" onClick={resetView}>
           <img className="icon-glyph" src={fullscreenIcon} alt="" />
+        </button>
+        <button
+          type="button"
+          className="icon-button"
+          aria-label={viewLocked ? 'Unlock table view' : 'Lock table view'}
+          title={viewLocked ? 'Unlock table view (allow pan/zoom)' : 'Lock table view (prevent pan/zoom)'}
+          onClick={() => setViewLocked((locked) => !locked)}
+        >
+          <img className="icon-glyph" src={viewLocked ? lockIcon : lockOpenIcon} alt="" />
         </button>
       </div>
 

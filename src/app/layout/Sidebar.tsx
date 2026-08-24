@@ -11,12 +11,12 @@ import {
 } from '../state/componentFactories';
 import type { AppState, CardinalDirection, MirrorOrientation, OpticalComponent, Point2d, TargetMode } from '../state/schema';
 import {
+  computeCavityIntrusions,
   computeDangerousPairs,
   getComponentPathPosition,
   getMovableLenses,
   moveComponentToPathZ,
   parseCavityRadius,
-  DANGEROUS_PROXIMITY_THRESHOLD_MM,
   MAX_OPTIMIZER_LENSES,
 } from '../state';
 import { snapPointToGrid } from '../state/snapToGrid';
@@ -24,12 +24,12 @@ import { GAUSSIAN_FILE_EXTENSION, parseAppState, serializeAppState } from '../st
 import { NumericField } from '../../ui/shared/NumericField';
 import { HelpPopout } from '../../ui/shared/HelpPopout';
 import { SettingsModal } from './SettingsModal';
+import { HelpModal } from './HelpModal';
 import { useTheme } from '../adapters/useTheme';
 import chevronDownIcon from '../../../icons/circle-chevron-down.svg';
 import chevronUpIcon from '../../../icons/circle-chevron-up.svg';
 import circlePlusIcon from '../../../icons/circle-plus.svg';
 import trashIcon from '../../../icons/trash-2.svg';
-import warningIcon from '../../../icons/triangle-alert.svg';
 
 /**
  * Which orientation to give a newly-added mirror so its reflective face
@@ -78,6 +78,7 @@ export function Sidebar() {
   const { theme, toggleTheme } = useTheme();
   const [modeMatchingOpen, setModeMatchingOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const applyLoadedFile = (text: string) => {
@@ -177,12 +178,27 @@ export function Sidebar() {
   );
 
   const dangerousPairs = useMemo(
-    () => computeDangerousPairs(state.components, state.sourceId, state.beamPath, DANGEROUS_PROXIMITY_THRESHOLD_MM),
-    [state.components, state.sourceId, state.beamPath],
+    () => computeDangerousPairs(state.components, state.sourceId, state.beamPath, state.table.minComponentSpacingMm),
+    [state.components, state.sourceId, state.beamPath, state.table.minComponentSpacingMm],
   );
 
   const movableLensCount = useMemo(() => getMovableLenses(state).length, [state.components]);
   const tooManyMovableLenses = movableLensCount > MAX_OPTIMIZER_LENSES;
+  const cavityIntrusions = useMemo(
+    () => computeCavityIntrusions(state.components, state.sourceId, state.beamPath),
+    [state.components, state.sourceId, state.beamPath],
+  );
+  const hasCavityIntrusion = cavityIntrusions.length > 0;
+  const cavityIntrusionMessagesByComponent = useMemo(() => {
+    const map: Record<string, string[]> = {};
+    for (const intrusion of cavityIntrusions) {
+      map[intrusion.cavityId] = map[intrusion.cavityId] ?? [];
+      map[intrusion.cavityId].push(`${intrusion.intruderLabel} sits inside this cavity's mirror span.`);
+      map[intrusion.intruderId] = map[intrusion.intruderId] ?? [];
+      map[intrusion.intruderId].push(`This component sits inside ${intrusion.cavityLabel}'s mirror span.`);
+    }
+    return map;
+  }, [cavityIntrusions]);
   const proximityByComponent = useMemo(() => {
     const map: Record<string, Array<{ otherLabel: string; distanceMm: number }>> = {};
     for (const pair of dangerousPairs) {
@@ -291,6 +307,7 @@ export function Sidebar() {
             <button type="button" onClick={handleSave}>Save</button>
             <button type="button" onClick={handleLoad}>Load</button>
             <button type="button" onClick={() => setSettingsOpen(true)}>Settings</button>
+            <button type="button" onClick={() => setHelpOpen(true)}>Help</button>
             <button
               type="button"
               className="icon-button danger-button"
@@ -385,6 +402,7 @@ export function Sidebar() {
                           `${component.label} is unstable: the cavity geometry (mirror curvatures and length) does not satisfy the resonator stability condition.`,
                         ]
                       : []),
+                    ...(cavityIntrusionMessagesByComponent[component.id] ?? []),
                   ];
                   return (
                     <tr
@@ -464,7 +482,7 @@ export function Sidebar() {
                               window.alert(warningMessages.join('\n'));
                             }}
                           >
-                            <img className="icon-glyph" src={warningIcon} alt="" />
+                            <WarningTriangleIcon />
                           </button>
                         )}
                       </td>
@@ -585,9 +603,26 @@ export function Sidebar() {
                 </div>
               )}
 
-              {tooManyMovableLenses && (
+              {hasCavityIntrusion && (
                 <div className="optimizer-warning">
-                  <img className="icon-glyph" src={warningIcon} alt="" />
+                  <WarningTriangleIcon />
+                  <span>
+                    {cavityIntrusions.map((intrusion) => (
+                      <span key={`${intrusion.cavityId}-${intrusion.intruderId}`} className="optimizer-warning-line">
+                        {intrusion.intruderLabel} sits inside {intrusion.cavityLabel}'s mirror span.
+                      </span>
+                    ))}{' '}
+                    Mode matching solutions are only calculated for cavities that aren't occupied by other
+                    components - a real cavity could have a lens or glass plate inside it, but modelling that
+                    is outside this tool's scope for now. Move the component(s) above outside the cavity (or
+                    move/shorten the cavity) to resume mode matching and the optimizer.
+                  </span>
+                </div>
+              )}
+
+              {!hasCavityIntrusion && tooManyMovableLenses && (
+                <div className="optimizer-warning">
+                  <WarningTriangleIcon />
                   <span>
                     {movableLensCount} movable lenses found, but the optimizer only considers up to{' '}
                     {MAX_OPTIMIZER_LENSES} at a time - more than that is too computationally intensive and can
@@ -597,7 +632,7 @@ export function Sidebar() {
                 </div>
               )}
 
-              <button type="button" onClick={() => runSolver(5)} disabled={tooManyMovableLenses}>
+              <button type="button" onClick={() => runSolver(5)} disabled={tooManyMovableLenses || hasCavityIntrusion}>
                 Run optimizer
               </button>
 
@@ -639,6 +674,7 @@ export function Sidebar() {
       </section>
 
       {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
+      {helpOpen && <HelpModal onClose={() => setHelpOpen(false)} />}
     </aside>
   );
 }
@@ -1012,6 +1048,28 @@ function LockIcon({ locked }: { locked: boolean }) {
   );
 }
 
+// Inline for the same reason as LockIcon above: only an inline <svg> picks up
+// the amber warning color via currentColor - as an <img>, this rendered
+// black regardless of theme, which read as invisible "dark-on-dark" against
+// a dark-mode button background.
+function WarningTriangleIcon() {
+  return (
+    <svg
+      className="icon-glyph warning-icon-glyph"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3" />
+      <path d="M12 9v4" />
+      <path d="M12 17h.01" />
+    </svg>
+  );
+}
+
 function getOrderedComponents(state: AppState): OpticalComponent[] {
   const ids = new Set<string>();
   const ordered: OpticalComponent[] = [];
@@ -1054,7 +1112,7 @@ function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
 }
 
-function getDefaultPlacement(state: AppState): { position: Point2d; direction: CardinalDirection } {
+export function getDefaultPlacement(state: AppState): { position: Point2d; direction: CardinalDirection } {
   const fallback: { position: Point2d; direction: CardinalDirection } = {
     position: {
       x: state.table.width * 0.5,
@@ -1085,8 +1143,22 @@ function getDefaultPlacement(state: AppState): { position: Point2d; direction: C
   const currentSegment = path.segments[lastHitIndex.index];
   const downstreamSegment = path.segments[lastHitIndex.index + 1];
   const direction = downstreamSegment?.direction ?? currentSegment.direction;
+
+  // currentSegment.end is the last-hit component's own position - which for
+  // a cavity is its input mirror (M1). The cavity's entire mirror span
+  // [M1, M2] is off-limits (see computeCavityIntrusions), so a new
+  // component must default to *after* the output mirror (M2), not just
+  // offsetMm past M1 where it would land inside the resonator.
+  const lastComponent = lastHitIndex.segment.terminatedByComponentId
+    ? state.components[lastHitIndex.segment.terminatedByComponentId]
+    : null;
+  const originPoint =
+    lastComponent?.kind === 'cavity_fp'
+      ? moveAlong(currentSegment.end, direction, lastComponent.length)
+      : currentSegment.end;
+
   return {
-    position: clampToTable(moveAlong(currentSegment.end, direction, offsetMm), state),
+    position: clampToTable(moveAlong(originPoint, direction, offsetMm), state),
     direction,
   };
 }

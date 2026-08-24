@@ -11,6 +11,7 @@ import type {
 } from './schema';
 import type { AppState, TableConfig } from './schema';
 import { DEFAULT_OPTIMISER_STATE } from './defaultState';
+import { DEFAULT_MIN_COMPONENT_SPACING_MM } from './pathUtils';
 
 function buildComponentId(prefix: string) {
   return `${prefix}-${crypto.randomUUID()}`;
@@ -146,6 +147,7 @@ export function createInitialAppState(): AppState {
     gridStandard: 'metric',
     snapToGrid: true,
     axisCaptureThreshold: 10, // 10mm threshold
+    minComponentSpacingMm: DEFAULT_MIN_COMPONENT_SPACING_MM,
   };
 
   const source = createSourceComponent({}, { x: 50, y: 300 });

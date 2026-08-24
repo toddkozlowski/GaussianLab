@@ -1,7 +1,13 @@
 import type { AppState, BeamPath, BeamSegment, OpticalComponent, Point2d } from './schema';
 
-/** Components closer than this (mm) trigger the "too close" proximity warning. */
-export const DANGEROUS_PROXIMITY_THRESHOLD_MM = 10;
+/**
+ * Default minimum allowed distance (mm) between components before the "too
+ * close" proximity warning fires. This is only the seed value for a new
+ * table's `TableConfig.minComponentSpacingMm` (user-editable in Settings) -
+ * once a table exists, its own configured value is what actually governs
+ * warnings and mode-matching validity, not this constant.
+ */
+export const DEFAULT_MIN_COMPONENT_SPACING_MM = 10;
 
 interface DangerousPair {
   aId: string;
@@ -158,7 +164,7 @@ export function computeDangerousPairs(
   components: Record<string, OpticalComponent>,
   sourceId: string | null,
   beamPath: BeamPath | null,
-  thresholdMm: number = DANGEROUS_PROXIMITY_THRESHOLD_MM,
+  thresholdMm: number,
 ): DangerousPair[] {
   const list = Object.values(components);
   const pairs: DangerousPair[] = [];
@@ -181,6 +187,64 @@ export function computeDangerousPairs(
   }
 
   return pairs;
+}
+
+export interface CavityIntrusion {
+  cavityId: string;
+  cavityLabel: string;
+  intruderId: string;
+  intruderLabel: string;
+}
+
+/**
+ * A cavity's own mirror span [M1, M2] is dead physical space - nothing else
+ * can sit inside a two-mirror resonator. The beam-path tracer doesn't know
+ * about a cavity's `length` at all (it treats the cavity as a zero-length
+ * pass-through point, see traceBeamPath), so nothing stops a component from
+ * geometrically landing between M1 and M2 - either by being dragged there
+ * directly, or by the cavity itself being moved/lengthened until its span
+ * grows to encompass something that used to sit safely downstream. Detect
+ * that situation here so callers can refuse to trust mode-matching results
+ * computed against a physically nonsensical table.
+ */
+export function computeCavityIntrusions(
+  components: Record<string, OpticalComponent>,
+  sourceId: string | null,
+  beamPath: BeamPath | null,
+): CavityIntrusion[] {
+  const intrusions: CavityIntrusion[] = [];
+
+  for (const cavity of Object.values(components)) {
+    if (cavity.kind !== 'cavity_fp') {
+      continue;
+    }
+
+    const m1Z = getComponentPathPosition(sourceId, beamPath, cavity.id);
+    if (m1Z === null) {
+      continue; // cavity isn't on the resolved path; nothing to check against
+    }
+    const m2Z = m1Z + cavity.length;
+
+    for (const other of Object.values(components)) {
+      if (other.id === cavity.id) {
+        continue;
+      }
+      const z = getComponentPathPosition(sourceId, beamPath, other.id);
+      if (z === null) {
+        continue;
+      }
+      if (z > m1Z && z < m2Z) {
+        intrusions.push({
+          cavityId: cavity.id,
+          cavityLabel: cavity.label,
+          intruderId: other.id,
+          intruderLabel: other.label,
+        });
+      }
+    }
+  }
+
+  return intrusions;
 }
 
 /**

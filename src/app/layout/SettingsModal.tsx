@@ -11,7 +11,8 @@ interface SettingsModalProps {
 const MIN_TABLE_DIMENSION_MM = 50;
 
 /**
- * Settings today: the optical table's size, and light/dark theme.
+ * Settings today: the optical table's size, its minimum inter-component
+ * spacing, and light/dark theme.
  *
  * Table size: the 2D canvas (Canvas.tsx) already renders reactively off
  * state.table.width/height, so applying here is just a normal
@@ -19,6 +20,11 @@ const MIN_TABLE_DIMENSION_MM = 50;
  * components positioned outside the new bounds (Canvas doesn't clip or move
  * them), so that case gets a confirmation prompt before the resize is
  * applied.
+ *
+ * Minimum component spacing: the same UPDATE_TABLE_CONFIG dispatch feeds
+ * computeDangerousPairs (the "too close" warning in the component table) and
+ * the optimizer's "avoid collisions" legality check - see
+ * TableConfig.minComponentSpacingMm. 0 disables the check entirely.
  *
  * Theme: a local UI preference (see theme.ts), not part of the document
  * state, so it applies immediately on toggle rather than waiting on Apply.
@@ -28,10 +34,12 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
   const { theme, toggleTheme } = useTheme();
   const [width, setWidth] = useState(state.table.width);
   const [height, setHeight] = useState(state.table.height);
+  const [minComponentSpacingMm, setMinComponentSpacingMm] = useState(state.table.minComponentSpacingMm);
 
-  const applyTableSize = () => {
+  const applySettings = () => {
     const nextWidth = Math.max(MIN_TABLE_DIMENSION_MM, Math.round(width));
     const nextHeight = Math.max(MIN_TABLE_DIMENSION_MM, Math.round(height));
+    const nextMinComponentSpacingMm = Math.max(0, minComponentSpacingMm);
 
     const strandedLabels = Object.values(state.components)
       .filter((component) => component.position.x > nextWidth || component.position.y > nextHeight)
@@ -47,7 +55,10 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
       }
     }
 
-    dispatch({ type: 'UPDATE_TABLE_CONFIG', payload: { width: nextWidth, height: nextHeight } });
+    dispatch({
+      type: 'UPDATE_TABLE_CONFIG',
+      payload: { width: nextWidth, height: nextHeight, minComponentSpacingMm: nextMinComponentSpacingMm },
+    });
     onClose();
   };
 
@@ -84,10 +95,18 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
             Table height (mm)
             <NumericField value={height} format={(value) => String(Math.round(value))} onCommit={setHeight} />
           </label>
+          <hr className="modal-divider" />
+          <label>
+            Minimum component spacing (mm)
+            <NumericField
+              value={minComponentSpacingMm}
+              onCommit={(value) => setMinComponentSpacingMm(Math.max(0, value))}
+            />
+          </label>
         </div>
         <footer className="modal-footer">
           <button type="button" onClick={onClose}>Cancel</button>
-          <button type="button" onClick={applyTableSize}>Apply</button>
+          <button type="button" onClick={applySettings}>Apply</button>
         </footer>
       </div>
     </div>,
