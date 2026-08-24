@@ -1136,6 +1136,15 @@ details > summary {
   text-overflow: ellipsis;
 }
 
+.status-chip--info {
+  max-width: none;
+}
+
+.status-chip--info span {
+  max-width: none;
+  color: var(--text-muted);
+}
+
 .status-pill {
   padding: 8px;
   border-radius: 10px;
@@ -1324,11 +1333,125 @@ details > summary {
   gap: 8px;
 }
 
+.help-modal-dialog {
+  width: min(720px, 94vw);
+}
+
+.help-modal-body {
+  display: grid;
+  grid-template-columns: 168px 1fr;
+  min-height: 380px;
+  max-height: min(560px, 68vh);
+  border: 1px solid rgba(var(--ink-rgb), 0.12);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.help-nav {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 2px;
+  padding: 10px;
+  background: rgba(var(--ink-rgb), 0.05);
+  overflow-y: auto;
+}
+
+/* The active item's background matches .help-content exactly (both
+   rgb(var(--surface-rgb))) so the seam between nav and content disappears
+   for that row - the tab reads as a folded-out extension of the panel it's
+   showing, rather than a separate control next to it. */
+.help-nav-item {
+  text-align: left;
+  border: none;
+  border-radius: 8px;
+  padding: 9px 12px;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 0.84rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.help-nav-item:hover {
+  background: rgba(var(--ink-rgb), 0.09);
+}
+
+.help-nav-item--active {
+  background: rgb(var(--surface-rgb));
+  color: var(--text-primary);
+  box-shadow: inset 3px 0 0 0 #2d9bf0;
+}
+
+.help-content {
+  padding: 16px 20px;
+  overflow-y: auto;
+  background: rgb(var(--surface-rgb));
+  font-size: 0.85rem;
+  line-height: 1.55;
+  color: var(--text-secondary);
+}
+
+.help-content h4 {
+  margin: 18px 0 6px;
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.help-content h4:first-child {
+  margin-top: 0;
+}
+
+.help-content p {
+  margin: 0 0 10px;
+}
+
+.help-content ul {
+  margin: 0 0 10px;
+  padding-left: 18px;
+  display: grid;
+  gap: 4px;
+}
+
+.help-content strong {
+  color: var(--text-primary);
+}
+
+.help-equation {
+  font-family: Cambria, 'Segoe UI', serif;
+  background: rgba(var(--ink-rgb), 0.05);
+  border-radius: 8px;
+  padding: 8px 12px;
+  text-align: center;
+}
+
 .settings-toggle-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+}
+
+.settings-field {
+  display: grid;
+  gap: 4px;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+}
+
+.settings-field-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+/* This field sits right above the input and footer buttons in the (narrow)
+   Settings modal, so the default downward-opening popout would cover both -
+   open it upward over the field above instead. */
+.settings-help-popout[open] > div {
+  top: auto;
+  bottom: 28px;
 }
 
 /* Toggle switch: a visually-hidden real checkbox (for click/keyboard/screen-

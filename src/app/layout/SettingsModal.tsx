@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { useAppStore } from '../adapters/useAppStore';
 import { useTheme } from '../adapters/useTheme';
 import { NumericField } from '../../ui/shared/NumericField';
+import { HelpPopout } from '../../ui/shared/HelpPopout';
 
 interface SettingsModalProps {
   onClose: () => void;
@@ -96,13 +97,21 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
             <NumericField value={height} format={(value) => String(Math.round(value))} onCommit={setHeight} />
           </label>
           <hr className="modal-divider" />
-          <label>
-            Minimum component spacing (mm)
+          <div className="settings-field">
+            <span className="settings-field-title">
+              Minimum component spacing (mm)
+              <HelpPopout className="settings-help-popout" summaryAriaLabel="What is minimum component spacing?">
+                The minimum allowed gap between optical elements before a "too close" warning is
+                flagged. This is also the spacing used when "Avoid collisions" is enabled, to keep
+                the auto-optimizer from placing lenses too close together.
+              </HelpPopout>
+            </span>
             <NumericField
+              aria-label="Minimum component spacing (mm)"
               value={minComponentSpacingMm}
               onCommit={(value) => setMinComponentSpacingMm(Math.max(0, value))}
             />
-          </label>
+          </div>
         </div>
         <footer className="modal-footer">
           <button type="button" onClick={onClose}>Cancel</button>
