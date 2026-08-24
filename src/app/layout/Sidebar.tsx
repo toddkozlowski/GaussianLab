@@ -26,8 +26,6 @@ import { HelpPopout } from '../../ui/shared/HelpPopout';
 import { SettingsModal } from './SettingsModal';
 import { HelpModal } from './HelpModal';
 import { useTheme } from '../adapters/useTheme';
-import chevronDownIcon from '../../../icons/circle-chevron-down.svg';
-import chevronUpIcon from '../../../icons/circle-chevron-up.svg';
 import circlePlusIcon from '../../../icons/circle-plus.svg';
 import trashIcon from '../../../icons/trash-2.svg';
 
@@ -76,7 +74,7 @@ function downloadTextFile(filename: string, content: string) {
 export function Sidebar() {
   const { state, dispatch, runSolver, applySolution, resetTable } = useAppStore();
   const { theme, toggleTheme } = useTheme();
-  const [modeMatchingOpen, setModeMatchingOpen] = useState(false);
+  const [modeMatchingOpen, setModeMatchingOpen] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -505,7 +503,7 @@ export function Sidebar() {
             onClick={() => setModeMatchingOpen((open) => !open)}
           >
             <h3>Mode Matching</h3>
-            <img className="icon-glyph" src={modeMatchingOpen ? chevronUpIcon : chevronDownIcon} alt="" />
+            <ChevronCircleIcon direction={modeMatchingOpen ? 'down' : 'up'} />
           </button>
         </header>
         {modeMatchingOpen && (
@@ -1066,6 +1064,26 @@ function WarningTriangleIcon() {
       <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3" />
       <path d="M12 9v4" />
       <path d="M12 17h.01" />
+    </svg>
+  );
+}
+
+// Inline for the same reason as LockIcon/WarningTriangleIcon above: only an
+// inline <svg> picks up currentColor, so this rendered black-on-black in
+// dark mode as an <img>.
+function ChevronCircleIcon({ direction }: { direction: 'up' | 'down' }) {
+  return (
+    <svg
+      className="icon-glyph"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth={2}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="12" cy="12" r="10" />
+      <path d={direction === 'up' ? 'm8 14 4-4 4 4' : 'm16 10-4 4-4-4'} />
     </svg>
   );
 }
