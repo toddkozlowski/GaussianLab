@@ -8,6 +8,7 @@ export const DEFAULT_TABLE_CONFIG: TableConfig = {
   snapToGrid: true,
   axisCaptureThreshold: 10,
   minComponentSpacingMm: DEFAULT_MIN_COMPONENT_SPACING_MM,
+  showWaists: false,
 };
 
 export const DEFAULT_OPTIMISER_STATE: OptimiserState = {

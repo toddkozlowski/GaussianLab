@@ -1041,17 +1041,6 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
                 </>
               )}
 
-              {propagationResult?.waists.map((waist, index) => (
-                <ReferenceDot
-                  key={`waist-${index}`}
-                  x={waist.z}
-                  y={waist.w * axisScale}
-                  r={4}
-                  fill="#2d9bf0"
-                  stroke="var(--chart-marker-ring)"
-                />
-              ))}
-
               {targetWaistMarkers.map((marker, index) => (
                 <ReferenceDot
                   key={`target-waist-${index}`}

@@ -272,10 +272,11 @@ export const CavityRenderer: React.FC<CavityRendererProps> = ({
         pointerEvents="none"
       />
 
-      {/* Length label, centered between M1 and M2 */}
+      {/* Length label: below M1, left-justified there - rather than
+          centered between M1 and M2. */}
       <Text
-        x={isHorizontal ? m2OffsetPx / 2 - 12 : mirrorSpan / 2 + 5}
-        y={isHorizontal ? -mirrorSpan / 2 - 2 : m2OffsetPx / 2 - 6}
+        x={isHorizontal ? -substrateThickness / 2 : mirrorSpan / 2 + 5}
+        y={isHorizontal ? mirrorSpan / 2 + 4 : -substrateThickness / 2 + 8}
         text={`L=${Math.round(component.length)}mm`}
         fontSize={10}
         fill={colors.labelSecondary}

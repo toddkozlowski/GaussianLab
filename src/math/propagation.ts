@@ -73,8 +73,8 @@ export class ConcreteBeamPropagationEngine implements PropagationEngine {
         const localWaistRadius = Math.sqrt((wavelengthMetres * qCurrent.im) / (Math.PI * refractiveIndex));
         if (Number.isFinite(localWaistRadius) && localWaistRadius > 0) {
           waists.push({
-            z: z_current + stretchWaistAt,
-            w: localWaistRadius,
+            z: (z_current + stretchWaistAt) * 1000,
+            w: localWaistRadius * 1000,
             componentId: waistComponentId,
           });
         }

@@ -88,31 +88,6 @@ export const BeamCorridorOverlay: React.FC<BeamCorridorOverlayProps> = ({
         listening={false}
       />
 
-      {propagationResult?.waists.map((waist, index) => {
-        const segment = beamPath.segments.find((s) => waist.z >= s.zStart && waist.z <= s.zEnd);
-        if (!segment) {
-          return null;
-        }
-
-        const segmentLength = Math.max(1e-6, segment.zEnd - segment.zStart);
-        const t = Math.min(1, Math.max(0, (waist.z - segment.zStart) / segmentLength));
-        const x = segment.start.x + (segment.end.x - segment.start.x) * t;
-        const y = segment.start.y + (segment.end.y - segment.start.y) * t;
-
-        return (
-          <Circle
-            key={`waist-${index}`}
-            x={mmToPx(x)}
-            y={mmToPx(y)}
-            radius={4}
-            fill="#2d9bf0"
-            stroke="#ffffff"
-            strokeWidth={1.5}
-            listening={false}
-          />
-        );
-      })}
-
       {typeof hoveredZMm === 'number' && (() => {
         const hoveredPoint = pointAlongPathAtZ(beamPath, hoveredZMm);
         if (!hoveredPoint) {

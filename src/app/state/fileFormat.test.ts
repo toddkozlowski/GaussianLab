@@ -52,6 +52,7 @@ function buildRichState(): AppState {
       snapToGrid: false,
       axisCaptureThreshold: 12.5,
       minComponentSpacingMm: 15,
+      showWaists: true,
     },
     sourceId: source.id,
     components: {

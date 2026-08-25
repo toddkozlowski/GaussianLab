@@ -658,12 +658,13 @@ describe('Propagation Engine', () => {
 
       // The waist is reported against whichever segment boundary it falls
       // within (here, the segment following the cavity), not tagged by
-      // cavity ID - so match purely on position.
-      const expectedWaistZM = (distanceToM1Mm + waistPositionFromM1Mm) / 1000;
-      const cavityWaist = result.waists.find((w) => Math.abs(w.z - expectedWaistZM) < 1e-9);
+      // cavity ID - so match purely on position. waists[].z/.w are in mm,
+      // like the rest of PropagationResult (profile, qFinal) - not metres.
+      const expectedWaistZMm = distanceToM1Mm + waistPositionFromM1Mm;
+      const cavityWaist = result.waists.find((w) => Math.abs(w.z - expectedWaistZMm) < 1e-6);
 
       expect(cavityWaist).toBeDefined();
-      expect(cavityWaist!.w).toBeCloseTo(0.06 / 1000, 9);
+      expect(cavityWaist!.w).toBeCloseTo(0.06, 6);
     });
 
     it('reports the true measured input-vs-eigenmode overlap per cavity, not clamped to 1 once matched', () => {

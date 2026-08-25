@@ -29,6 +29,7 @@ import { CustomObjectRenderer } from './components/CustomObjectRenderer';
 import { CavityStabilityDiagram } from './components/CavityStabilityDiagram';
 import { GridOverlay } from './GridOverlay';
 import { BeamCorridorOverlay } from './BeamCorridorOverlay';
+import { WaistMarkersOverlay } from './WaistMarkersOverlay';
 import { TuningRangeOverlay } from './TuningRangeOverlay';
 import { snapPointToGrid, gridSpacingMm } from '../../app/state/snapToGrid';
 import { parseCavityRadius } from '../../app/state/cavityRadius';
@@ -643,6 +644,14 @@ export const Canvas: React.FC<CanvasProps> = ({
                 )}
               </React.Fragment>
             ))}
+
+            {config.showWaists && (
+              <WaistMarkersOverlay
+                beamPath={beamPath}
+                propagationResult={propagationResult}
+                mmToPx={mmToPx}
+              />
+            )}
           </Group>
         </Layer>
       </Stage>

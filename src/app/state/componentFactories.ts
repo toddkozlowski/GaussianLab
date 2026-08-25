@@ -148,6 +148,7 @@ export function createInitialAppState(): AppState {
     snapToGrid: true,
     axisCaptureThreshold: 10, // 10mm threshold
     minComponentSpacingMm: DEFAULT_MIN_COMPONENT_SPACING_MM,
+    showWaists: false,
   };
 
   const source = createSourceComponent({}, { x: 50, y: 300 });

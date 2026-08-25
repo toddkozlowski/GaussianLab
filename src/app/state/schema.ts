@@ -136,6 +136,8 @@ export interface TableConfig {
    * User-editable in Settings; 0 disables the check entirely.
    */
   minComponentSpacingMm: number;
+  /** Show a marker (and w0 label) at every beam-waist location on the 2D canvas. */
+  showWaists: boolean;
 }
 
 export interface BeamSegment {

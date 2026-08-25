@@ -29,6 +29,11 @@ const MIN_TABLE_DIMENSION_MM = 50;
  *
  * Theme: a local UI preference (see theme.ts), not part of the document
  * state, so it applies immediately on toggle rather than waiting on Apply.
+ *
+ * Show waists: toggles WaistMarkersOverlay on the 2D canvas, marking every
+ * beam-waist location reported by propagationResult.waists. Part of the
+ * document (TableConfig.showWaists), so it applies immediately like the
+ * theme toggle rather than waiting on Apply.
  */
 export function SettingsModal({ onClose }: SettingsModalProps) {
   const { state, dispatch } = useAppStore();
@@ -81,6 +86,25 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                 checked={theme === 'dark'}
                 onChange={toggleTheme}
                 aria-label="Toggle dark mode"
+              />
+              <span className="switch-track">
+                <span className="switch-thumb" />
+              </span>
+            </span>
+          </label>
+          <label className="settings-toggle-row">
+            <span>Show waists</span>
+            <span className="switch">
+              <input
+                type="checkbox"
+                checked={state.table.showWaists}
+                onChange={(event) =>
+                  dispatch({
+                    type: 'UPDATE_TABLE_CONFIG',
+                    payload: { showWaists: event.target.checked },
+                  })
+                }
+                aria-label="Toggle beam waist markers"
               />
               <span className="switch-track">
                 <span className="switch-thumb" />
