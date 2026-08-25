@@ -69,7 +69,14 @@ function GetStartedSection() {
     <>
       <p>
         GaussianLab lays out a virtual optical table and propagates a Gaussian laser beam through
-        it in real time. Four things are worth understanding before you start moving parts around.
+        various components.
+      </p>
+
+      <h4>Table File options</h4>
+      <p>
+        These buttons allow you to Save and Load files containing information about the current optical set-up. Table set-ups
+        are saved as easily-readable plaintext files with the extension '.gaussian'. Be sure to save any files which 
+        you may want to return to, or share between devices - set-ups stored exclusively in your browser's cache may be cleared periodically.
       </p>
 
       <h4>Adding components</h4>
@@ -77,9 +84,9 @@ function GetStartedSection() {
         Use the "+" buttons above the component table (Mirror, Lens, Cavity, Target, Beam Stop,
         Custom Object) to drop a new part onto the table, or drag any existing part directly on
         the 2D canvas. Components snap onto the beam axis when dragged close to it, and otherwise
-        snap to the table's grid (grid spacing and snapping can be changed in Settings). Click a
-        part - on the canvas or in the component table - to select it and edit its properties in
-        the popup card.
+        snap to the table's grid (grid spacing and snapping will later be possible to change in Settings). Click a
+        part (on the canvas or in the component table) to select it and edit its properties in
+        the pop-up card.
       </p>
 
       <h4>The 2D table view</h4>
@@ -104,7 +111,8 @@ function GetStartedSection() {
       <p>
         Covered in full in the Mode Matching tab. In short: mark a cavity or a Target component as
         the mode you want to couple into, and the solver repositions your movable lenses to
-        maximize the beam's overlap with that mode.
+        maximize the beam's overlap with that mode. Current limitations in browser-based computation 
+        restricts this to a maximum of three positionable lenses at a time.
       </p>
     </>
   );
@@ -161,13 +169,16 @@ function ComponentsSection() {
       <h4>Cavity (Fabry–Pérot)</h4>
       <p>
         A two-mirror resonator. Rather than tracing a single pass through it, GaussianLab solves
-        for the cavity's own self-consistent <strong>eigenmode</strong>: the one Gaussian beam
+        for the cavity's <strong>eigenmode</strong>: the one Gaussian beam
         shape that reproduces itself after a full round trip. For round-trip matrix
         M = [[A, B], [C, D]], the eigenmode's q-parameter satisfies
         C·q² + (D−A)·q − B = 0; the physical root (positive imaginary part) is then converted to a
         waist size and position via 1/q = 1/R − iλ/(πw²). The cavity is stable only if
         0 ≤ g₁·g₂ ≤ 1, where g = 1 − L/R for each mirror (L = cavity length, R = that mirror's
-        radius of curvature) - an unstable cavity has no finite eigenmode and is flagged as such.
+        radius of curvature) - an unstable cavity has no finite eigenmode and is flagged as such. 
+        A plot of the cavity stability parameter is accessible in the 'Show Stability' pop-out of the cavity component card in the 2D view. 
+        The profile of the Gaussian beam in transmission of a cavity object assumes the eigenmode of the cavity. 
+        For mode-matching of the input beam to a cavity with an overlap of less than 25%, the cavity is treated like a beam-stop and no beam is propagated onwards. 
       </p>
       <ul>
         <li>Length (mm) - mirror separation</li>
