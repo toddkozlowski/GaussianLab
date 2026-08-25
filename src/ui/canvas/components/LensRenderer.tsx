@@ -67,6 +67,14 @@ export const LensRenderer: React.FC<LensRendererProps> = ({
       dragBoundFunc={(pos) => getSnappedDragPositionPx(component, pos)}
       onDragMove={handleDragMove}
       onDragEnd={handleDragEnd}
+      onClick={() => onSelect(component.id)}
+      onTap={() => onSelect(component.id)}
+      onMouseEnter={() => {
+        document.body.style.cursor = isDraggable ? 'grab' : 'pointer';
+      }}
+      onMouseLeave={() => {
+        document.body.style.cursor = 'default';
+      }}
     >
       <Rect
         x={-width / 2}
@@ -76,9 +84,6 @@ export const LensRenderer: React.FC<LensRendererProps> = ({
         fill={component.focalLength > 0 ? '#7ED321' : '#F5A623'}
         stroke={isSelected ? '#1f6feb' : '#2E7D32'}
         strokeWidth={isSelected ? 3 : 2}
-        onClick={() => onSelect(component.id)}
-        onTap={() => onSelect(component.id)}
-        cursor={isDraggable ? 'grab' : 'default'}
       />
       <Text
         x={width / 2 + 5}

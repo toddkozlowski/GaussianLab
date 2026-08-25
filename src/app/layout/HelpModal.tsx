@@ -86,10 +86,9 @@ function GetStartedSection() {
       <p>
         The canvas shows every component on a physical, top-down layout in millimetres, tracing
         the beam path (the orange line) as it reflects and refracts through the table. Scroll (or
-        a two-finger trackpad swipe) pans the view; Ctrl/Cmd + scroll (or a pinch gesture) zooms
-        toward the pointer. The zoom controls in the canvas's bottom-left corner zoom in/out and
-        reset the view. Dragging a part on the canvas repositions it; dragging empty table space
-        pans instead.
+        pinch on a trackpad) zooms toward the pointer; the zoom controls in the canvas's
+        bottom-left corner also zoom in/out and reset the view. Dragging a part on the canvas
+        repositions it; dragging empty table space pans the view instead.
       </p>
 
       <h4>The unfolded beam-path view</h4>

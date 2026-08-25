@@ -181,15 +181,11 @@ export const Canvas: React.FC<CanvasProps> = ({
       return;
     }
 
-    if (event.evt.ctrlKey || event.evt.metaKey) {
-      // Pinch-zoom gesture (reported by browsers as ctrl+wheel) or explicit
-      // ctrl/cmd+scroll: zoom centered on the pointer.
-      const zoomFactor = Math.exp(-event.evt.deltaY * 0.0025);
-      zoomAround(pointer, zoomFactor);
-    } else {
-      // Plain wheel/two-finger scroll: pan.
-      setView((prev) => ({ ...prev, x: prev.x - event.evt.deltaX, y: prev.y - event.evt.deltaY }));
-    }
+    // Any wheel/trackpad scroll zooms, centered on the pointer - panning is
+    // done by dragging empty table space instead, so scroll never fights
+    // the user by sliding the view up/down.
+    const zoomFactor = Math.exp(-event.evt.deltaY * 0.0025);
+    zoomAround(pointer, zoomFactor);
   };
 
   const handleStageMouseDown = (event: Konva.KonvaEventObject<MouseEvent>) => {

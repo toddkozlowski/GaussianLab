@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent, ReactNode } from 'react';
 import { useAppStore } from '../adapters/useAppStore';
 import {
@@ -174,6 +174,36 @@ export function Sidebar() {
       ),
     [state.components]
   );
+
+  // With exactly one cavity/target on the table, there's only one sensible
+  // mode-matching target - pick it automatically rather than making the
+  // user open the dropdown. Only fires when nothing valid is already
+  // selected, so it won't fight an explicit choice once a second candidate
+  // exists, and it also recovers a selection left dangling by deleting the
+  // previously-targeted component.
+  useEffect(() => {
+    if (targetableComponents.length !== 1) {
+      return;
+    }
+
+    const onlyCandidate = targetableComponents[0];
+    const isAlreadySelected =
+      (state.targetMode?.kind === 'cavity' && state.targetMode.cavityComponentId === onlyCandidate.id) ||
+      (state.targetMode?.kind === 'target' && state.targetMode.targetComponentId === onlyCandidate.id);
+    if (isAlreadySelected) {
+      return;
+    }
+
+    dispatch({
+      type: 'SET_TARGET_MODE',
+      payload: {
+        targetMode:
+          onlyCandidate.kind === 'cavity_fp'
+            ? { kind: 'cavity', cavityComponentId: onlyCandidate.id }
+            : { kind: 'target', targetComponentId: onlyCandidate.id },
+      },
+    });
+  }, [targetableComponents, state.targetMode]);
 
   const dangerousPairs = useMemo(
     () => computeDangerousPairs(state.components, state.sourceId, state.beamPath, state.table.minComponentSpacingMm),

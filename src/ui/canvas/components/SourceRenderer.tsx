@@ -113,7 +113,7 @@ export const SourceRenderer: React.FC<SourceRendererProps> = ({
       onClick={() => onSelect(component.id)}
       onTap={() => onSelect(component.id)}
       onMouseEnter={() => {
-        if (isDraggable) document.body.style.cursor = 'grab';
+        document.body.style.cursor = isDraggable ? 'grab' : 'pointer';
       }}
       onMouseLeave={() => {
         document.body.style.cursor = 'default';
