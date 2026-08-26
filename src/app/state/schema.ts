@@ -229,6 +229,31 @@ export interface OptimiserState {
   manualRanges: ManualAdjustmentRange[];
 }
 
+/**
+ * One user-entered (z, measured waist radius) sample for the "Waist Fit"
+ * panel. Both fields start null (blank row); a row only counts toward the
+ * fit once both are filled in with a number.
+ */
+export interface WaistFitPoint {
+  id: string;
+  zMm: number | null;
+  waistRadiusMm: number | null;
+}
+
+/** The (z0, w0) recovered by fitting a Gaussian beam to the entered points. */
+export interface WaistFitResult {
+  zMm: number;
+  waistRadiusMm: number;
+}
+
+export interface WaistFitState {
+  points: WaistFitPoint[];
+  /** When true, each valid point is overlaid on the profile chart and the 2D table. */
+  showOnBeamPath: boolean;
+  /** Cleared back to null whenever a point is edited, so a stale fit is never shown as current. */
+  result: WaistFitResult | null;
+}
+
 export interface AppState {
   table: TableConfig;
   components: Record<string, OpticalComponent>;
@@ -238,4 +263,5 @@ export interface AppState {
   targetMode: TargetMode | null;
   optimiser: OptimiserState;
   selectedComponentId: string | null;
+  waistFit: WaistFitState;
 }

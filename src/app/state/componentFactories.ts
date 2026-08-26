@@ -10,7 +10,7 @@ import type {
   TargetComponent,
 } from './schema';
 import type { AppState, TableConfig } from './schema';
-import { DEFAULT_OPTIMISER_STATE } from './defaultState';
+import { DEFAULT_OPTIMISER_STATE, DEFAULT_WAIST_FIT_STATE } from './defaultState';
 import { DEFAULT_MIN_COMPONENT_SPACING_MM } from './pathUtils';
 
 function buildComponentId(prefix: string) {
@@ -164,5 +164,6 @@ export function createInitialAppState(): AppState {
     targetMode: null,
     optimiser: DEFAULT_OPTIMISER_STATE,
     selectedComponentId: null,
+    waistFit: DEFAULT_WAIST_FIT_STATE,
   };
 }

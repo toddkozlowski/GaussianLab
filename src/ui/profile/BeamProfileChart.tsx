@@ -17,6 +17,7 @@ import type {
   PropagationResult,
   SourceComponent,
   TargetMode,
+  WaistFitState,
 } from '../../app/state/schema';
 import { NumericField } from '../shared/NumericField';
 import lockIcon from '../../../icons/lock.svg';
@@ -32,6 +33,7 @@ interface BeamProfileChartProps {
   onHoverZMm: (zMm: number | null) => void;
   liveOverlap: number | null;
   onMoveComponentAlongPath: (componentId: string, zMm: number) => void;
+  waistFit: WaistFitState;
 }
 
 interface ProfilePoint {
@@ -223,6 +225,7 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
   onHoverZMm,
   liveOverlap,
   onMoveComponentAlongPath,
+  waistFit,
 }) => {
   const frameRef = React.useRef<HTMLDivElement>(null);
   const [draggingComponentId, setDraggingComponentId] = useState<string | null>(null);
@@ -514,6 +517,18 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
     return markers;
   }, [beamPath, components]);
 
+  // Only fully-entered (z, w) rows from the Waist Fit panel plot as dots -
+  // a row with just one field filled in isn't a usable sample yet.
+  const waistFitDots = useMemo(() => {
+    if (!waistFit.showOnBeamPath) {
+      return [] as Array<{ id: string; zMm: number; waistRadiusMm: number }>;
+    }
+    return waistFit.points.filter(
+      (point): point is { id: string; zMm: number; waistRadiusMm: number } =>
+        point.zMm !== null && point.waistRadiusMm !== null,
+    );
+  }, [waistFit.points, waistFit.showOnBeamPath]);
+
   const profileData = useMemo<ProfilePoint[]>(() => {
     if (projections.length === 0 && cavityEigenmodeAreas.length === 0) {
       return baseProfile;
@@ -569,8 +584,14 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
       }
     }
     return Math.max(maxValue, pointMax);
-  }, targetWaistMarkers.reduce((max, marker) => Math.max(max, marker.w), 0));
-  const dataXMaxMm = profileData[profileData.length - 1]?.z ?? 0;
+  }, Math.max(
+    targetWaistMarkers.reduce((max, marker) => Math.max(max, marker.w), 0),
+    waistFitDots.reduce((max, point) => Math.max(max, point.waistRadiusMm), 0),
+  ));
+  const dataXMaxMm = waistFitDots.reduce(
+    (max, point) => Math.max(max, point.zMm),
+    profileData[profileData.length - 1]?.z ?? 0,
+  );
   const effectiveYMaxMm = Math.max(lockYAxis ? lockedYMaxMm : profileMaxMm, 0.001);
   const effectiveXMaxMm = Math.max(lockXAxis ? lockedXMaxMm : dataXMaxMm, 0.001);
   const effectiveYMinMm = lockYAxis ? lockedYMinMm : 0;
@@ -617,6 +638,28 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
     setLockedYMaxMm(nextMaxMm);
     setLockYAxis(true);
   };
+
+  // The fitted Gaussian curve, sampled across the visible x-range - a
+  // standalone series (its own `data`) rather than merged into chartData,
+  // since it has no reason to share profileData's sample grid.
+  const waistFitCurveData = useMemo(() => {
+    if (!waistFit.result || !source) {
+      return [] as Array<{ z: number; wFitAxis: number }>;
+    }
+    const span = roundedXAxisMax - roundedXAxisMin;
+    if (span <= 0) {
+      return [];
+    }
+    const { zMm: fitZ0, waistRadiusMm: fitW0 } = waistFit.result;
+    const SAMPLE_COUNT = 120;
+    const points: Array<{ z: number; wFitAxis: number }> = [];
+    for (let i = 0; i <= SAMPLE_COUNT; i += 1) {
+      const z = roundedXAxisMin + (span * i) / SAMPLE_COUNT;
+      points.push({ z, wFitAxis: beamRadiusFromWaist(fitW0, fitZ0, z, source.wavelength) * axisScale });
+    }
+    return points;
+  }, [waistFit.result, source, roundedXAxisMin, roundedXAxisMax, axisScale]);
+
   const chartData: Array<Record<string, number | null>> = profileData.map((point) => {
     const scaled: Record<string, number | null> = {
       z: point.z,
@@ -1050,6 +1093,33 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
                   fill="#17A2B8"
                   stroke="var(--chart-marker-ring)"
                   strokeWidth={2}
+                />
+              ))}
+
+              {waistFitCurveData.length > 0 && (
+                <Line
+                  data={waistFitCurveData}
+                  dataKey="wFitAxis"
+                  type="monotone"
+                  stroke="#16a34a"
+                  strokeWidth={2}
+                  strokeDasharray="6 4"
+                  dot={false}
+                  isAnimationActive={false}
+                  legendType="none"
+                  tooltipType="none"
+                />
+              )}
+
+              {waistFitDots.map((point) => (
+                <ReferenceDot
+                  key={`waist-fit-point-${point.id}`}
+                  x={point.zMm}
+                  y={point.waistRadiusMm * axisScale}
+                  r={4}
+                  fill="#16a34a"
+                  stroke="var(--chart-marker-ring)"
+                  strokeWidth={1.5}
                 />
               ))}
             </ComposedChart>

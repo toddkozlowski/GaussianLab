@@ -17,10 +17,12 @@ import {
   getMovableLenses,
   moveComponentToPathZ,
   parseCavityRadius,
+  pointOnBeamPathAtZ,
   MAX_OPTIMIZER_LENSES,
 } from '../state';
 import { snapPointToGrid } from '../state/snapToGrid';
 import { GAUSSIAN_FILE_EXTENSION, parseAppState, serializeAppState } from '../state/fileFormat';
+import { fitGaussianWaist, MIN_WAIST_FIT_POINTS } from '../../math/waistFit';
 import { NumericField } from '../../ui/shared/NumericField';
 import { HelpPopout } from '../../ui/shared/HelpPopout';
 import { SettingsModal } from './SettingsModal';
@@ -75,8 +77,25 @@ export function Sidebar() {
   const { state, dispatch, runSolver, applySolution, resetTable } = useAppStore();
   const { theme, toggleTheme } = useTheme();
   const [modeMatchingOpen, setModeMatchingOpen] = useState(true);
+  const [waistFitOpen, setWaistFitOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+
+  // Waist Fit and Mode Matching are mutually exclusive - each shares the
+  // sidebar's flexible row with the component table, so having both open at
+  // once would cramp both. Opening one always closes the other.
+  const openModeMatching = (open: boolean) => {
+    setModeMatchingOpen(open);
+    if (open) {
+      setWaistFitOpen(false);
+    }
+  };
+  const openWaistFit = (open: boolean) => {
+    setWaistFitOpen(open);
+    if (open) {
+      setModeMatchingOpen(false);
+    }
+  };
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const applyLoadedFile = (text: string) => {
@@ -311,6 +330,51 @@ export function Sidebar() {
     dispatch({ type: 'SET_TARGET_MODE', payload: { targetMode } });
   };
 
+  const validWaistFitPoints = state.waistFit.points.filter(
+    (point): point is { id: string; zMm: number; waistRadiusMm: number } =>
+      point.zMm !== null && point.waistRadiusMm !== null,
+  );
+
+  const handleCalculateWaistFit = () => {
+    const fit = fitGaussianWaist(
+      validWaistFitPoints.map((point) => ({ zMm: point.zMm, waistRadiusMm: point.waistRadiusMm })),
+    );
+    if (!fit) {
+      window.alert(
+        "Couldn't fit a Gaussian beam waist to these points - they may be too noisy, all at the same z, " +
+          'or not show a clear minimum.',
+      );
+      return;
+    }
+    dispatch({ type: 'SET_WAIST_FIT_RESULT', payload: { result: fit } });
+  };
+
+  const handleSetWaistFitAsSource = () => {
+    const result = state.waistFit.result;
+    if (!result || !state.sourceId) {
+      return;
+    }
+    dispatch({
+      type: 'UPDATE_COMPONENT',
+      payload: { id: state.sourceId, updates: { waistRadius: result.waistRadiusMm, waistOffset: result.zMm } },
+    });
+  };
+
+  const handleSetWaistFitAsTarget = () => {
+    const result = state.waistFit.result;
+    if (!result || !state.beamPath) {
+      return;
+    }
+    const position = pointOnBeamPathAtZ(state.beamPath, result.zMm);
+    if (!position) {
+      return;
+    }
+    const target = createTargetComponent(state.components, position);
+    target.waistRadius = result.waistRadiusMm;
+    dispatch({ type: 'ADD_COMPONENT', payload: target });
+    dispatch({ type: 'SET_SELECTED_COMPONENT', payload: { componentId: target.id } });
+  };
+
   const selectedTargetId =
     state.targetMode?.kind === 'cavity'
       ? state.targetMode.cavityComponentId
@@ -324,8 +388,10 @@ export function Sidebar() {
       aria-label="Simulation controls"
       style={{
         gridTemplateRows: modeMatchingOpen
-          ? 'auto minmax(160px, 1fr) minmax(160px, 1fr)'
-          : 'auto minmax(280px, 1.35fr) auto',
+          ? 'auto minmax(160px, 1fr) minmax(160px, 1fr) auto'
+          : waistFitOpen
+            ? 'auto minmax(160px, 1fr) auto minmax(160px, 1fr)'
+            : 'auto minmax(280px, 1.35fr) auto auto',
       }}
     >
       <section className="panel file-toolbar-panel">
@@ -530,7 +596,7 @@ export function Sidebar() {
             type="button"
             className="mode-matching-header-toggle"
             aria-expanded={modeMatchingOpen}
-            onClick={() => setModeMatchingOpen((open) => !open)}
+            onClick={() => openModeMatching(!modeMatchingOpen)}
           >
             <h3>Mode Matching</h3>
             <ChevronCircleIcon direction={modeMatchingOpen ? 'down' : 'up'} />
@@ -695,6 +761,107 @@ export function Sidebar() {
                     </tbody>
                   </table>
                 </div>
+              )}
+            </div>
+          </div>
+        )}
+      </section>
+
+      <section className="panel waist-fit-panel">
+        <header className={waistFitOpen ? 'panel-header' : 'panel-header panel-header--collapsed'}>
+          <button
+            type="button"
+            className="mode-matching-header-toggle"
+            aria-expanded={waistFitOpen}
+            onClick={() => openWaistFit(!waistFitOpen)}
+          >
+            <h3>Waist Fit</h3>
+            <ChevronCircleIcon direction={waistFitOpen ? 'down' : 'up'} />
+          </button>
+        </header>
+        {waistFitOpen && (
+          <div className="panel-body">
+            <div className="stack">
+              <label className="mode-matching-inline-toggle">
+                <input
+                  type="checkbox"
+                  checked={state.waistFit.showOnBeamPath}
+                  onChange={(event) =>
+                    dispatch({ type: 'SET_WAIST_FIT_SHOW_ON_PATH', payload: { show: event.target.checked } })
+                  }
+                />
+                Show on beam path
+              </label>
+
+              <div className="waist-fit-table-wrap">
+                <table className="waist-fit-table">
+                  <thead>
+                    <tr>
+                      <th><ColumnTitle title="z" unit="mm" /></th>
+                      <th><ColumnTitle title="Waist radius" unit="µm" /></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {state.waistFit.points.map((point) => (
+                      <tr key={point.id}>
+                        <td>
+                          <NumericField
+                            aria-label="Measured z (mm)"
+                            value={point.zMm}
+                            onCommit={(value) =>
+                              dispatch({
+                                type: 'UPDATE_WAIST_FIT_POINT',
+                                payload: { id: point.id, updates: { zMm: value } },
+                              })
+                            }
+                          />
+                        </td>
+                        <td>
+                          <NumericField
+                            aria-label="Measured waist radius (µm)"
+                            value={point.waistRadiusMm === null ? null : point.waistRadiusMm * 1000}
+                            format={(value) => value.toFixed(1)}
+                            onCommit={(value) =>
+                              dispatch({
+                                type: 'UPDATE_WAIST_FIT_POINT',
+                                payload: { id: point.id, updates: { waistRadiusMm: Math.max(0, value) / 1000 } },
+                              })
+                            }
+                          />
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleCalculateWaistFit}
+                disabled={validWaistFitPoints.length < MIN_WAIST_FIT_POINTS}
+              >
+                Calculate Fit
+              </button>
+
+              {state.waistFit.result && (
+                <>
+                  <p className="waist-fit-result-text">
+                    Fitted waist: z = {formatFixed3(state.waistFit.result.zMm)} mm, w<sub>0</sub> ={' '}
+                    {(state.waistFit.result.waistRadiusMm * 1000).toFixed(1)} µm
+                  </p>
+                  <div className="waist-fit-actions">
+                    <button type="button" disabled={!state.sourceId} onClick={handleSetWaistFitAsSource}>
+                      Set as Source
+                    </button>
+                    <button
+                      type="button"
+                      disabled={!state.beamPath?.isValid}
+                      onClick={handleSetWaistFitAsTarget}
+                    >
+                      Set as Target
+                    </button>
+                  </div>
+                </>
               )}
             </div>
           </div>

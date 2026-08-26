@@ -11,3 +11,4 @@ export * from './cavity';
 export * from './overlap';
 export * from './optimizer';
 export * from './propagation';
+export * from './waistFit';

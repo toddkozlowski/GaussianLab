@@ -62,6 +62,7 @@ export function ProfilePane({ hoveredZMm, onHoverZMm }: ProfilePaneProps) {
               onHoverZMm={onHoverZMm}
               liveOverlap={liveOverlap}
               onMoveComponentAlongPath={handleComponentPathMove}
+              waistFit={state.waistFit}
             />
           </Suspense>
         )}

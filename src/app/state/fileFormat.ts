@@ -26,7 +26,7 @@ import type {
   TableConfig,
   TargetMode,
 } from './schema';
-import { DEFAULT_OPTIMISER_STATE } from './defaultState';
+import { DEFAULT_OPTIMISER_STATE, DEFAULT_WAIST_FIT_STATE } from './defaultState';
 
 export const GAUSSIAN_FILE_EXTENSION = '.gaussian';
 const FORMAT_VERSION = 1;
@@ -404,5 +404,6 @@ export function parseAppState(text: string): AppState {
     targetMode,
     optimiser: DEFAULT_OPTIMISER_STATE,
     selectedComponentId: null,
+    waistFit: DEFAULT_WAIST_FIT_STATE,
   };
 }

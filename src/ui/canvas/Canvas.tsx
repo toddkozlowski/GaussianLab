@@ -30,6 +30,7 @@ import { CavityStabilityDiagram } from './components/CavityStabilityDiagram';
 import { GridOverlay } from './GridOverlay';
 import { BeamCorridorOverlay } from './BeamCorridorOverlay';
 import { WaistMarkersOverlay } from './WaistMarkersOverlay';
+import { WaistFitPointsOverlay } from './WaistFitPointsOverlay';
 import { TuningRangeOverlay } from './TuningRangeOverlay';
 import { snapPointToGrid, gridSpacingMm } from '../../app/state/snapToGrid';
 import { parseCavityRadius } from '../../app/state/cavityRadius';
@@ -651,6 +652,10 @@ export const Canvas: React.FC<CanvasProps> = ({
                 propagationResult={propagationResult}
                 mmToPx={mmToPx}
               />
+            )}
+
+            {state.waistFit.showOnBeamPath && (
+              <WaistFitPointsOverlay beamPath={beamPath} points={state.waistFit.points} mmToPx={mmToPx} />
             )}
           </Group>
         </Layer>

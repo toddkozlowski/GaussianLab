@@ -15,8 +15,9 @@ import type {
   TargetMode,
   CardinalDirection,
   GridStandard,
+  WaistFitResult,
 } from './schema';
-import { DEFAULT_OPTIMISER_STATE } from './defaultState';
+import { DEFAULT_OPTIMISER_STATE, DEFAULT_WAIST_FIT_STATE } from './defaultState';
 
 /**
  * All possible actions that can be dispatched to update AppState.
@@ -38,6 +39,12 @@ export type AppAction =
   | { type: 'UPDATE_MANUAL_RANGE'; payload: { id: string; updates: Partial<{ startZMm: number; endZMm: number }> } }
   | { type: 'REMOVE_MANUAL_RANGE'; payload: { id: string } }
   | { type: 'CLEAR_SOLVER_SNAPSHOT'; payload: {} }
+  | {
+      type: 'UPDATE_WAIST_FIT_POINT';
+      payload: { id: string; updates: Partial<{ zMm: number | null; waistRadiusMm: number | null }> };
+    }
+  | { type: 'SET_WAIST_FIT_SHOW_ON_PATH'; payload: { show: boolean } }
+  | { type: 'SET_WAIST_FIT_RESULT'; payload: { result: WaistFitResult | null } }
   | { type: 'RESET_STATE' }
   | { type: 'LOAD_STATE'; payload: AppState };
 
@@ -263,6 +270,55 @@ export function appStateReducer(state: AppState, action: AppAction): AppState {
       };
     }
 
+    case 'UPDATE_WAIST_FIT_POINT': {
+      const { id, updates } = action.payload;
+      const index = state.waistFit.points.findIndex((point) => point.id === id);
+      if (index < 0) {
+        return state;
+      }
+
+      const updatedPoint = { ...state.waistFit.points[index], ...updates };
+      let points = state.waistFit.points.map((point, i) => (i === index ? updatedPoint : point));
+
+      // Once the last row gets any value, append a fresh blank row beneath
+      // it - a spreadsheet-style auto-growing list, so there's always room
+      // to keep entering more samples without an explicit "add row" click.
+      const isLastRow = index === points.length - 1;
+      const hasAnyValue = updatedPoint.zMm !== null || updatedPoint.waistRadiusMm !== null;
+      if (isLastRow && hasAnyValue) {
+        points = [...points, { id: `waist-fit-row-${crypto.randomUUID()}`, zMm: null, waistRadiusMm: null }];
+      }
+
+      return {
+        ...state,
+        waistFit: {
+          ...state.waistFit,
+          points,
+          result: null, // any point edit invalidates a previously computed fit
+        },
+      };
+    }
+
+    case 'SET_WAIST_FIT_SHOW_ON_PATH': {
+      return {
+        ...state,
+        waistFit: {
+          ...state.waistFit,
+          showOnBeamPath: action.payload.show,
+        },
+      };
+    }
+
+    case 'SET_WAIST_FIT_RESULT': {
+      return {
+        ...state,
+        waistFit: {
+          ...state.waistFit,
+          result: action.payload.result,
+        },
+      };
+    }
+
     case 'RESET_STATE': {
       // Return to a blank slate (user asked to reset the table)
       // This will be replaced with DEFAULT_APP_STATE import if needed
@@ -273,6 +329,7 @@ export function appStateReducer(state: AppState, action: AppAction): AppState {
         selectedComponentId: null,
         targetMode: null,
         optimiser: DEFAULT_OPTIMISER_STATE,
+        waistFit: DEFAULT_WAIST_FIT_STATE,
       };
     }
 

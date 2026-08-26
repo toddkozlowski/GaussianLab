@@ -344,4 +344,95 @@ describe('appStateReducer', () => {
     expect(state.components).not.toBe(newState.components);
     expect(state).not.toBe(newState);
   });
+
+  describe('waist fit actions', () => {
+    it('updates the targeted point without touching the others', () => {
+      const state = DEFAULT_APP_STATE;
+      const targetId = state.waistFit.points[1].id;
+
+      const action: AppAction = {
+        type: 'UPDATE_WAIST_FIT_POINT',
+        payload: { id: targetId, updates: { zMm: 50 } },
+      };
+      const newState = appStateReducer(state, action);
+
+      expect(newState.waistFit.points[1]).toMatchObject({ id: targetId, zMm: 50, waistRadiusMm: null });
+      expect(newState.waistFit.points[0]).toEqual(state.waistFit.points[0]);
+    });
+
+    it('appends a fresh blank row once the last row gets a value', () => {
+      const state = DEFAULT_APP_STATE;
+      const lastRow = state.waistFit.points[state.waistFit.points.length - 1];
+      expect(state.waistFit.points).toHaveLength(5);
+
+      const action: AppAction = {
+        type: 'UPDATE_WAIST_FIT_POINT',
+        payload: { id: lastRow.id, updates: { zMm: 100 } },
+      };
+      const newState = appStateReducer(state, action);
+
+      expect(newState.waistFit.points).toHaveLength(6);
+      const appendedRow = newState.waistFit.points[5];
+      expect(appendedRow.zMm).toBeNull();
+      expect(appendedRow.waistRadiusMm).toBeNull();
+      expect(appendedRow.id).not.toBe(lastRow.id);
+    });
+
+    it('does not append a row when a non-last row is edited', () => {
+      const state = DEFAULT_APP_STATE;
+      const firstRow = state.waistFit.points[0];
+
+      const action: AppAction = {
+        type: 'UPDATE_WAIST_FIT_POINT',
+        payload: { id: firstRow.id, updates: { zMm: 10 } },
+      };
+      const newState = appStateReducer(state, action);
+
+      expect(newState.waistFit.points).toHaveLength(5);
+    });
+
+    it('clears a previously computed fit result whenever a point is edited', () => {
+      const state = {
+        ...DEFAULT_APP_STATE,
+        waistFit: { ...DEFAULT_APP_STATE.waistFit, result: { zMm: 10, waistRadiusMm: 0.2 } },
+      };
+
+      const action: AppAction = {
+        type: 'UPDATE_WAIST_FIT_POINT',
+        payload: { id: state.waistFit.points[0].id, updates: { zMm: 5 } },
+      };
+      const newState = appStateReducer(state, action);
+
+      expect(newState.waistFit.result).toBeNull();
+    });
+
+    it('toggles showOnBeamPath', () => {
+      const state = DEFAULT_APP_STATE;
+      const action: AppAction = { type: 'SET_WAIST_FIT_SHOW_ON_PATH', payload: { show: false } };
+      const newState = appStateReducer(state, action);
+      expect(newState.waistFit.showOnBeamPath).toBe(false);
+    });
+
+    it('stores a computed fit result', () => {
+      const state = DEFAULT_APP_STATE;
+      const result = { zMm: 42, waistRadiusMm: 0.15 };
+      const action: AppAction = { type: 'SET_WAIST_FIT_RESULT', payload: { result } };
+      const newState = appStateReducer(state, action);
+      expect(newState.waistFit.result).toEqual(result);
+    });
+
+    it('resets waistFit back to its default on RESET_STATE', () => {
+      const state = {
+        ...DEFAULT_APP_STATE,
+        waistFit: {
+          points: [{ id: 'x', zMm: 1, waistRadiusMm: 2 }],
+          showOnBeamPath: false,
+          result: { zMm: 1, waistRadiusMm: 0.1 },
+        },
+      };
+
+      const newState = appStateReducer(state, { type: 'RESET_STATE' });
+      expect(newState.waistFit).toEqual(DEFAULT_APP_STATE.waistFit);
+    });
+  });
 });
