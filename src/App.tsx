@@ -1,7 +1,7 @@
 import { AppShell } from './app/layout/AppShell';
 import { initializeStore } from './app/state/Store';
 import { createInitialAppState } from './app/state/componentFactories';
-import { loadStateFromStorage } from './app/state/persistence';
+import { loadStateFromStorage, loadWaistFitFromStorage } from './app/state/persistence';
 import type { CavityFPComponent } from './app/state/schema';
 import type { CavitySolver } from './app/state/types/Layer0Interfaces';
 import { solveTwoMirrorEigenmode } from './math/cavity';
@@ -37,7 +37,12 @@ const cavitySolver: CavitySolver = {
 
 const ensureStoreInitialized = () => {
   if (!storeInitialized) {
-    const initialState = loadStateFromStorage() ?? createInitialAppState();
+    const baseState = loadStateFromStorage() ?? createInitialAppState();
+    // The Waist Fit panel's points live in their own storage entry (see
+    // persistence.ts) rather than the table autosave/file format, so they're
+    // restored as a separate overlay here.
+    const persistedWaistFit = loadWaistFitFromStorage();
+    const initialState = persistedWaistFit ? { ...baseState, waistFit: persistedWaistFit } : baseState;
     initializeStore(initialState, propagationEngine, cavitySolver);
     storeInitialized = true;
   }

@@ -17,7 +17,7 @@ import { resolveAppState } from './stateResolver';
 import type { PropagationEngine, CavitySolver } from './types/Layer0Interfaces';
 import { runModeMatchSolver } from './solverService';
 import { createInitialAppState } from './componentFactories';
-import { clearStoredState, saveStateToStorage } from './persistence';
+import { clearStoredState, clearWaistFitStorage, saveStateToStorage, saveWaistFitToStorage } from './persistence';
 
 export type StateListener = (state: AppState) => void;
 
@@ -79,6 +79,7 @@ export class AppStore {
       this.autosaveTimer = null;
     }
     clearStoredState();
+    clearWaistFitStorage();
     this.dispatch({ type: 'LOAD_STATE', payload: createInitialAppState() });
   }
 
@@ -89,6 +90,7 @@ export class AppStore {
     this.autosaveTimer = setTimeout(() => {
       this.autosaveTimer = null;
       saveStateToStorage(this.state);
+      saveWaistFitToStorage(this.state.waistFit);
     }, AUTOSAVE_DEBOUNCE_MS);
   }
 

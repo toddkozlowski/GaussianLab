@@ -1,6 +1,6 @@
 import { calculateModeOverlapFromWaistParams } from '../../math/overlap';
 import { computeCavityIntrusions } from './pathUtils';
-import type { AppState } from './schema';
+import type { AppState, ComplexNumber } from './schema';
 
 interface BeamWaist {
   w0Mm: number;
@@ -9,6 +9,34 @@ interface BeamWaist {
 
 function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value));
+}
+
+/**
+ * Derive the beam's own (natural) waist size and position from its
+ * q-parameter at the point where it reaches some z along the unfolded path
+ * (zEnd), given the q-parameter measured at that same point.
+ */
+export function beamWaistFromQ(
+  q: ComplexNumber | undefined,
+  zEndMm: number,
+  wavelengthNm: number,
+): BeamWaist | null {
+  if (!q || q.im <= 0) {
+    return null;
+  }
+
+  const wavelengthMm = wavelengthNm * 1e-6;
+  const w0Mm = Math.sqrt((wavelengthMm * q.im) / Math.PI);
+  if (!Number.isFinite(w0Mm) || w0Mm <= 0) {
+    return null;
+  }
+
+  const z0Mm = zEndMm - q.re;
+  if (!Number.isFinite(z0Mm)) {
+    return null;
+  }
+
+  return { w0Mm, z0Mm };
 }
 
 /**
@@ -25,20 +53,8 @@ export function getBeamWaistAtComponent(
     return null;
   }
 
-  const q = result.qAtComponent[componentId];
-  if (!q || q.im <= 0) {
-    return null;
-  }
-
   const source = state.sourceId ? state.components[state.sourceId] : null;
   if (!source || source.kind !== 'source') {
-    return null;
-  }
-
-  const wavelengthNm = source.wavelength;
-  const wavelengthMm = wavelengthNm * 1e-6;
-  const w0Mm = Math.sqrt((wavelengthMm * q.im) / Math.PI);
-  if (!Number.isFinite(w0Mm) || w0Mm <= 0) {
     return null;
   }
 
@@ -47,12 +63,12 @@ export function getBeamWaistAtComponent(
     return null;
   }
 
-  const z0Mm = encounter.zEnd - q.re;
-  if (!Number.isFinite(z0Mm)) {
+  const waist = beamWaistFromQ(result.qAtComponent[componentId], encounter.zEnd, source.wavelength);
+  if (!waist) {
     return null;
   }
 
-  return { w0Mm, z0Mm, wavelengthNm };
+  return { ...waist, wavelengthNm: source.wavelength };
 }
 
 export function getTargetBeamWaist(state: AppState): BeamWaist | null {

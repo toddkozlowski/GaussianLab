@@ -35,16 +35,17 @@ import { TuningRangeOverlay } from './TuningRangeOverlay';
 import { snapPointToGrid, gridSpacingMm } from '../../app/state/snapToGrid';
 import { parseCavityRadius } from '../../app/state/cavityRadius';
 import { NumericField } from '../shared/NumericField';
-import lockIcon from '../../../icons/lock.svg';
-import lockOpenIcon from '../../../icons/lock-open.svg';
-import eyeIcon from '../../../icons/eye.svg';
-import eyeOffIcon from '../../../icons/eye-off.svg';
-import rotateCcwIcon from '../../../icons/rotate-ccw.svg';
-import rotateCwIcon from '../../../icons/rotate-cw.svg';
-import trashIcon from '../../../icons/trash-2.svg';
-import zoomInIcon from '../../../icons/zoom-in.svg';
-import zoomOutIcon from '../../../icons/zoom-out.svg';
-import fullscreenIcon from '../../../icons/fullscreen.svg';
+import {
+  LockIcon,
+  EyeIcon,
+  EyeOffIcon,
+  RotateCcwIcon,
+  RotateCwIcon,
+  TrashIcon,
+  ZoomInIcon,
+  ZoomOutIcon,
+  FullscreenIcon,
+} from '../shared/icons';
 
 const MIN_ZOOM = 0.25;
 const MAX_ZOOM = 6;
@@ -669,7 +670,7 @@ export const Canvas: React.FC<CanvasProps> = ({
           disabled={viewLocked}
           onClick={() => zoomAround({ x: viewportSize.width / 2, y: viewportSize.height / 2 }, 1 / 1.25)}
         >
-          <img className="icon-glyph" src={zoomOutIcon} alt="" />
+          <ZoomOutIcon />
         </button>
         <span className="canvas-zoom-readout">{Math.round(view.scale * 100)}%</span>
         <button
@@ -679,10 +680,10 @@ export const Canvas: React.FC<CanvasProps> = ({
           disabled={viewLocked}
           onClick={() => zoomAround({ x: viewportSize.width / 2, y: viewportSize.height / 2 }, 1.25)}
         >
-          <img className="icon-glyph" src={zoomInIcon} alt="" />
+          <ZoomInIcon />
         </button>
         <button type="button" className="icon-button" aria-label="Reset view" title="Reset view" onClick={resetView}>
-          <img className="icon-glyph" src={fullscreenIcon} alt="" />
+          <FullscreenIcon />
         </button>
         <button
           type="button"
@@ -691,7 +692,7 @@ export const Canvas: React.FC<CanvasProps> = ({
           title={viewLocked ? 'Unlock table view (allow pan/zoom)' : 'Lock table view (prevent pan/zoom)'}
           onClick={() => setViewLocked((locked) => !locked)}
         >
-          <img className="icon-glyph" src={viewLocked ? lockIcon : lockOpenIcon} alt="" />
+          <LockIcon locked={viewLocked} />
         </button>
       </div>
 
@@ -715,8 +716,20 @@ export const Canvas: React.FC<CanvasProps> = ({
                     })
                   }
                 >
-                  <img className="icon-glyph" src={selected.showProjection ? eyeIcon : eyeOffIcon} alt="" />
+                  {selected.showProjection ? <EyeIcon /> : <EyeOffIcon />}
                 </button>
+              )}
+              {(selected.kind === 'mirror_flat' ||
+                selected.kind === 'source' ||
+                (selected.kind === 'cavity_fp' && !isSelectedOnPath)) && (
+                <>
+                  <button type="button" className="icon-button" aria-label="Rotate counterclockwise" onClick={() => rotateSelected(false)}>
+                    <RotateCcwIcon />
+                  </button>
+                  <button type="button" className="icon-button" aria-label="Rotate clockwise" onClick={() => rotateSelected(true)}>
+                    <RotateCwIcon />
+                  </button>
+                </>
               )}
               <button
                 type="button"
@@ -724,11 +737,11 @@ export const Canvas: React.FC<CanvasProps> = ({
                 aria-label={selected.locked ? 'Unlock component' : 'Lock component'}
                 onClick={toggleLockSelected}
               >
-                <img className="icon-glyph" src={selected.locked ? lockIcon : lockOpenIcon} alt="" />
+                <LockIcon locked={selected.locked} />
               </button>
               {selected.kind !== 'source' && (
                 <button type="button" className="icon-button danger-button" aria-label="Delete component" onClick={deleteSelected}>
-                  <img className="icon-glyph" src={trashIcon} alt="" />
+                  <TrashIcon />
                 </button>
               )}
             </div>
@@ -760,20 +773,6 @@ export const Canvas: React.FC<CanvasProps> = ({
                 onCommit={(value) => updateCanvasPosition(dispatch, config, selected.id, selected.position, 'y', value)}
               />
             </label>
-          </div>
-          <div className="canvas-selection-actions">
-            {(selected.kind === 'mirror_flat' ||
-              selected.kind === 'source' ||
-              (selected.kind === 'cavity_fp' && !isSelectedOnPath)) && (
-              <>
-                <button type="button" className="icon-button" aria-label="Rotate counterclockwise" onClick={() => rotateSelected(false)}>
-                  <img className="icon-glyph" src={rotateCcwIcon} alt="" />
-                </button>
-                <button type="button" className="icon-button" aria-label="Rotate clockwise" onClick={() => rotateSelected(true)}>
-                  <img className="icon-glyph" src={rotateCwIcon} alt="" />
-                </button>
-              </>
-            )}
           </div>
 
           {selected.kind === 'source' && (

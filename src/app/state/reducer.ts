@@ -45,6 +45,7 @@ export type AppAction =
     }
   | { type: 'SET_WAIST_FIT_SHOW_ON_PATH'; payload: { show: boolean } }
   | { type: 'SET_WAIST_FIT_RESULT'; payload: { result: WaistFitResult | null } }
+  | { type: 'CLEAR_WAIST_FIT_POINTS'; payload: {} }
   | { type: 'RESET_STATE' }
   | { type: 'LOAD_STATE'; payload: AppState };
 
@@ -315,6 +316,17 @@ export function appStateReducer(state: AppState, action: AppAction): AppState {
         waistFit: {
           ...state.waistFit,
           result: action.payload.result,
+        },
+      };
+    }
+
+    case 'CLEAR_WAIST_FIT_POINTS': {
+      return {
+        ...state,
+        waistFit: {
+          ...state.waistFit,
+          points: DEFAULT_WAIST_FIT_STATE.points,
+          result: null,
         },
       };
     }

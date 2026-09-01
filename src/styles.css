@@ -45,6 +45,13 @@
      dark button background, so it isn't redefined per-theme below. */
   --warning-icon-color: #e0952b;
 
+  /* Overlap-chip percentage color tiers: >75% good, 50-75% marginal, <50%
+     poor. Redefined per-theme below since a single value can't stay legible
+     against both a light and a dark chip background. */
+  --overlap-good: #1a7f37;
+  --overlap-mid: #c76a00;
+  --overlap-bad: #a3242f;
+
   color: var(--text-primary);
   background: var(--page-bg);
   font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
@@ -89,6 +96,10 @@
   --chart-axis-text: #9aa7b8;
   --chart-neutral-line: #5c6b7d;
   --chart-marker-ring: #1b2129;
+
+  --overlap-good: #3ddc73;
+  --overlap-mid: #e0c93e;
+  --overlap-bad: #e9a3a3;
 }
 
 * {
@@ -529,6 +540,15 @@ button:disabled {
   gap: 8px;
 }
 
+/* Overrides .mode-matching-header-toggle's width: 100% - this header also
+   has a HelpPopout sitting after the toggle button, so the button should
+   only claim the space it needs rather than pushing the popout out. */
+.profile-header-toggle {
+  width: auto;
+  flex: 1;
+  min-width: 0;
+}
+
 .profile-help-popout[open] > div {
   width: 280px;
   right: auto;
@@ -801,12 +821,6 @@ button:disabled {
   white-space: nowrap;
 }
 
-.canvas-selection-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 6px;
-}
-
 .canvas-source-editor {
   display: grid;
   gap: 6px;
@@ -989,6 +1003,7 @@ button:disabled {
 .danger-button {
   border-color: rgba(192, 34, 54, 0.45);
   background: linear-gradient(180deg, rgba(255, 244, 246, 0.96), rgba(255, 229, 233, 0.96));
+  color: #7a1424;
 }
 
 .danger-button:hover {
@@ -1023,10 +1038,36 @@ button:disabled {
 
 .profile-chart-shell {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   gap: 6px;
   height: 100%;
   min-height: 0;
+}
+
+/* Fixed height (rather than sizing to its absolutely-positioned chip
+   children, which wouldn't contribute to it) so the row above the chart
+   frame stays a consistent height whether or not any chips are showing.
+   Explicit grid-row placements here and on .profile-chart-toolbar/
+   .profile-chart-frame mean this row can be omitted entirely (no cavities
+   or targets to report on) without the frame below sliding up to take its
+   track - each element always keeps its own assigned row. */
+.profile-chip-lane {
+  position: relative;
+  height: 30px;
+  grid-row: 2;
+}
+
+.profile-overlap-caption {
+  position: absolute;
+  top: 0;
+  left: 4px;
+}
+
+.profile-overlap-chip--pinned {
+  position: absolute;
+  top: 0;
+  transform: translateX(-50%);
+  white-space: nowrap;
 }
 
 .profile-chart-toolbar {
@@ -1035,6 +1076,7 @@ button:disabled {
   align-items: center;
   flex-wrap: wrap;
   gap: 14px;
+  grid-row: 1;
 }
 
 .profile-chart-toolbar-toggles {
@@ -1042,6 +1084,15 @@ button:disabled {
   align-items: center;
   flex-wrap: wrap;
   gap: 14px;
+}
+
+.profile-view-tools {
+  display: flex;
+  gap: 6px;
+}
+
+.profile-zoom-tool-active {
+  color: #2d9bf0;
 }
 
 .profile-gouy-toggle {
@@ -1061,6 +1112,19 @@ button:disabled {
   position: relative;
   height: 100%;
   min-height: 0;
+  grid-row: 3;
+}
+
+.profile-chart-frame--zooming {
+  cursor: crosshair;
+}
+
+.profile-zoom-selection {
+  position: absolute;
+  border: 1px dashed #2d9bf0;
+  background: rgba(45, 155, 240, 0.14);
+  pointer-events: none;
+  z-index: 4;
 }
 
 .profile-axis-edge-field {

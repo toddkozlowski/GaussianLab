@@ -25,6 +25,7 @@ import { GAUSSIAN_FILE_EXTENSION, parseAppState, serializeAppState } from '../st
 import { fitGaussianWaist, MIN_WAIST_FIT_POINTS } from '../../math/waistFit';
 import { NumericField } from '../../ui/shared/NumericField';
 import { HelpPopout } from '../../ui/shared/HelpPopout';
+import { ChevronCircleIcon } from '../../ui/shared/icons';
 import { SettingsModal } from './SettingsModal';
 import { HelpModal } from './HelpModal';
 import { useTheme } from '../adapters/useTheme';
@@ -799,6 +800,7 @@ export function Sidebar() {
                     <tr>
                       <th><ColumnTitle title="z" unit="mm" /></th>
                       <th><ColumnTitle title="Waist radius" unit="µm" /></th>
+                      <th className="icon-col"></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -829,19 +831,46 @@ export function Sidebar() {
                             }
                           />
                         </td>
+                        <td className="icon-col">
+                          {(point.zMm !== null || point.waistRadiusMm !== null) && (
+                            <button
+                              type="button"
+                              className="icon-button danger-button"
+                              aria-label="Clear this row"
+                              onClick={() =>
+                                dispatch({
+                                  type: 'UPDATE_WAIST_FIT_POINT',
+                                  payload: { id: point.id, updates: { zMm: null, waistRadiusMm: null } },
+                                })
+                              }
+                            >
+                              <img className="icon-glyph" src={trashIcon} alt="" />
+                            </button>
+                          )}
+                        </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
 
-              <button
-                type="button"
-                onClick={handleCalculateWaistFit}
-                disabled={validWaistFitPoints.length < MIN_WAIST_FIT_POINTS}
-              >
-                Calculate Fit
-              </button>
+              <div className="waist-fit-actions">
+                <button
+                  type="button"
+                  onClick={handleCalculateWaistFit}
+                  disabled={validWaistFitPoints.length < MIN_WAIST_FIT_POINTS}
+                >
+                  Calculate Fit
+                </button>
+                <button
+                  type="button"
+                  className="danger-button"
+                  disabled={validWaistFitPoints.length === 0}
+                  onClick={() => dispatch({ type: 'CLEAR_WAIST_FIT_POINTS', payload: {} })}
+                >
+                  Clear all
+                </button>
+              </div>
 
               {state.waistFit.result && (
                 <>
@@ -1261,26 +1290,6 @@ function WarningTriangleIcon() {
       <path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3" />
       <path d="M12 9v4" />
       <path d="M12 17h.01" />
-    </svg>
-  );
-}
-
-// Inline for the same reason as LockIcon/WarningTriangleIcon above: only an
-// inline <svg> picks up currentColor, so this rendered black-on-black in
-// dark mode as an <img>.
-function ChevronCircleIcon({ direction }: { direction: 'up' | 'down' }) {
-  return (
-    <svg
-      className="icon-glyph"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth={2}
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <circle cx="12" cy="12" r="10" />
-      <path d={direction === 'up' ? 'm8 14 4-4 4 4' : 'm16 10-4 4-4-4'} />
     </svg>
   );
 }

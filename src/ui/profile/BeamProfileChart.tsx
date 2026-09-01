@@ -20,8 +20,9 @@ import type {
   WaistFitState,
 } from '../../app/state/schema';
 import { NumericField } from '../shared/NumericField';
-import lockIcon from '../../../icons/lock.svg';
-import lockOpenIcon from '../../../icons/lock-open.svg';
+import { FullscreenIcon, LockIcon, SearchIcon } from '../shared/icons';
+import { beamWaistFromQ } from '../../app/state/modeMetrics';
+import { calculateModeOverlapFromWaistParams } from '../../math/overlap';
 
 interface BeamProfileChartProps {
   source: SourceComponent | null;
@@ -31,7 +32,6 @@ interface BeamProfileChartProps {
   targetMode: TargetMode | null;
   hoveredZMm: number | null;
   onHoverZMm: (zMm: number | null) => void;
-  liveOverlap: number | null;
   onMoveComponentAlongPath: (componentId: string, zMm: number) => void;
   waistFit: WaistFitState;
 }
@@ -148,41 +148,35 @@ function renderXAxisLabel(props: any) {
 }
 
 /**
- * Schematic mirror symbol (a face with angled hatching on its back, the
- * standard optics-diagram glyph) drawn at the top of a cavity mirror's
- * reference line, with its label underneath - so a mirror reads as a
- * physical object on the profile rather than just another dashed line.
+ * A component's position label, rendered just above the plotted region
+ * (rather than inside it) so the dashed reference line marking that
+ * component's z-position never overlaps/crosses the label text.
  */
-function renderCavityMirrorLabel(labelText: string, color: string) {
+function renderMarkerLabel(labelText: string, color: string, fontWeight = 400) {
   return (props: any) => {
     const viewBox = props?.viewBox;
     if (!viewBox) {
       return <g />;
     }
-    const x = viewBox.x;
-    const faceY = viewBox.y + 2;
-    const halfWidth = 7;
-    const hatchOffsets = [-halfWidth, -halfWidth / 3, halfWidth / 3, halfWidth];
+    const x = viewBox.x + (viewBox.width ?? 0) / 2;
+    const y = viewBox.y - 8;
     return (
-      <g>
-        <line x1={x - halfWidth} y1={faceY} x2={x + halfWidth} y2={faceY} stroke={color} strokeWidth={2.5} strokeLinecap="round" />
-        {hatchOffsets.map((offset, i) => (
-          <line
-            key={i}
-            x1={x + offset}
-            y1={faceY}
-            x2={x + offset - 4}
-            y2={faceY + 8}
-            stroke={color}
-            strokeWidth={1.2}
-          />
-        ))}
-        <text x={x} y={faceY + 22} textAnchor="middle" fontSize={11} fill={color}>
-          {labelText}
-        </text>
-      </g>
+      <text x={x} y={y} textAnchor="middle" fontSize={11} fontWeight={fontWeight} fill={color}>
+        {labelText}
+      </text>
     );
   };
+}
+
+// Overlap fraction (0-1) -> the CSS variable naming its color tier.
+function overlapColorVar(overlap: number): string {
+  if (overlap > 0.75) {
+    return 'var(--overlap-good)';
+  }
+  if (overlap >= 0.5) {
+    return 'var(--overlap-mid)';
+  }
+  return 'var(--overlap-bad)';
 }
 
 function formatAxisMax(value: number): string {
@@ -223,7 +217,6 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
   targetMode,
   hoveredZMm,
   onHoverZMm,
-  liveOverlap,
   onMoveComponentAlongPath,
   waistFit,
 }) => {
@@ -322,12 +315,17 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
     return markers;
   }, [beamPath, components]);
 
-  const cavityOverlapMarkers = useMemo(() => {
-    if (!beamPath || !propagationResult) {
-      return [] as Array<{ z: number; label: string; good: boolean }>;
+  // One standardized overlap readout per mode-matchable component present in
+  // the profile (every cavity and every target the beam actually reaches),
+  // pinned above that component's own position on the chart - see
+  // chipPositions below for how each chip's z maps to a de-overlapped pixel
+  // position.
+  const modeMatchChips = useMemo(() => {
+    if (!beamPath || !propagationResult || !source) {
+      return [] as Array<{ id: string; label: string; overlap: number; z: number }>;
     }
 
-    const markers: Array<{ z: number; label: string; good: boolean }> = [];
+    const chips: Array<{ id: string; label: string; overlap: number; z: number }> = [];
 
     for (const segment of beamPath.segments) {
       const id = segment.terminatedByComponentId;
@@ -336,24 +334,34 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
       }
 
       const component = components[id];
-      if (!component || component.kind !== 'cavity_fp') {
+      if (!component) {
         continue;
       }
 
-      const overlap = propagationResult.cavityOverlap[id];
-      if (typeof overlap !== 'number') {
-        continue;
+      if (component.kind === 'cavity_fp') {
+        const overlap = propagationResult.cavityOverlap[id];
+        if (typeof overlap === 'number') {
+          // segment.zEnd is the cavity's input mirror (M1) - see cavityMarkers above.
+          chips.push({ id, label: component.label, overlap, z: segment.zEnd });
+        }
+      } else if (component.kind === 'target') {
+        const beamWaist = beamWaistFromQ(propagationResult.qAtComponent[id], segment.zEnd, source.wavelength);
+        if (!beamWaist) {
+          continue;
+        }
+        const overlap = calculateModeOverlapFromWaistParams(
+          beamWaist.w0Mm,
+          beamWaist.z0Mm,
+          component.waistRadius,
+          segment.zEnd,
+          source.wavelength,
+        );
+        chips.push({ id, label: component.label, overlap, z: segment.zEnd });
       }
-
-      markers.push({
-        z: segment.zEnd,
-        label: `${(overlap * 100).toFixed(1)}%`,
-        good: overlap >= 0.5,
-      });
     }
 
-    return markers;
-  }, [beamPath, components, propagationResult]);
+    return chips;
+  }, [beamPath, components, propagationResult, source]);
 
   const lensMarkers = useMemo(() => {
     if (!beamPath) {
@@ -530,7 +538,7 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
   }, [waistFit.points, waistFit.showOnBeamPath]);
 
   const profileData = useMemo<ProfilePoint[]>(() => {
-    if (projections.length === 0 && cavityEigenmodeAreas.length === 0) {
+    if (projections.length === 0 && cavityEigenmodeAreas.length === 0 && !waistFit.result) {
       return baseProfile;
     }
     if (!source) {
@@ -556,9 +564,22 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
           extended[`eigenmode_${area.id}`] = beamRadiusFromWaist(area.w0Mm, area.z0Mm, point.z, source.wavelength);
         }
       }
+      // Sampled on the same z-grid as the rest of the profile (rather than
+      // a separate arbitrary grid passed via its own `data` prop) - mixing
+      // differently-sized data arrays across a chart's series confuses
+      // recharts' mouse-tracked activeLabel, which got stuck unable to
+      // report a hovered z past the end of the shorter array.
+      if (waistFit.result) {
+        extended.waistFitFit = beamRadiusFromWaist(
+          waistFit.result.waistRadiusMm,
+          waistFit.result.zMm,
+          point.z,
+          source.wavelength,
+        );
+      }
       return extended;
     });
-  }, [baseProfile, projections, cavityEigenmodeAreas, source]);
+  }, [baseProfile, projections, cavityEigenmodeAreas, waistFit.result, source]);
 
   const [lockYAxis, setLockYAxis] = useState(false);
   const [lockedYMaxMm, setLockedYMaxMm] = useState(1);
@@ -568,6 +589,9 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
   const [lockedXMinMm, setLockedXMinMm] = useState(0);
   const [showGouyPhase, setShowGouyPhase] = useState(false);
   const [gouyPhaseWrapped, setGouyPhaseWrapped] = useState(false);
+  const [zoomToolActive, setZoomToolActive] = useState(false);
+  const [zoomDragStartPx, setZoomDragStartPx] = useState<{ x: number; y: number } | null>(null);
+  const [zoomDragCurrentPx, setZoomDragCurrentPx] = useState<{ x: number; y: number } | null>(null);
 
   const profileMaxMm = profileData.reduce((maxValue, point) => {
     let pointMax = point.w;
@@ -582,6 +606,9 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
       if (typeof value === 'number') {
         pointMax = Math.max(pointMax, value);
       }
+    }
+    if (typeof point.waistFitFit === 'number') {
+      pointMax = Math.max(pointMax, point.waistFitFit);
     }
     return Math.max(maxValue, pointMax);
   }, Math.max(
@@ -615,6 +642,36 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
     [roundedYAxisMin, roundedYAxisMax],
   );
 
+  // Each chip starts centered above its own component's z-position, then gets
+  // nudged rightward (in ascending-z order, which already matches left-to-
+  // right layout) just enough that no two chips - assumed to be about
+  // CHIP_WIDTH_PX wide - end up closer than CHIP_MIN_GAP_PX apart.
+  const chipPositions = useMemo(() => {
+    if (!plotBounds) {
+      return [] as Array<{ id: string; label: string; overlap: number; x: number }>;
+    }
+
+    const CHIP_WIDTH_PX = 108;
+    const CHIP_MIN_GAP_PX = 5;
+    const minSpacing = CHIP_WIDTH_PX + CHIP_MIN_GAP_PX;
+
+    const zSpan = roundedXAxisMax - roundedXAxisMin;
+    const withIdealX = modeMatchChips
+      .map((chip) => {
+        const ratio = zSpan > 0 ? Math.max(0, Math.min(1, (chip.z - roundedXAxisMin) / zSpan)) : 0;
+        return { ...chip, x: plotBounds.left + ratio * plotBounds.width };
+      })
+      .sort((a, b) => a.x - b.x);
+
+    let prevX = -Infinity;
+    for (const chip of withIdealX) {
+      chip.x = Math.max(chip.x, prevX + minSpacing);
+      prevX = chip.x;
+    }
+
+    return withIdealX;
+  }, [modeMatchChips, plotBounds, roundedXAxisMin, roundedXAxisMax]);
+
   const applyXRange = (nextMinMm: number, nextMaxMm: number) => {
     if (!Number.isFinite(nextMinMm) || !Number.isFinite(nextMaxMm)) {
       return;
@@ -639,27 +696,6 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
     setLockYAxis(true);
   };
 
-  // The fitted Gaussian curve, sampled across the visible x-range - a
-  // standalone series (its own `data`) rather than merged into chartData,
-  // since it has no reason to share profileData's sample grid.
-  const waistFitCurveData = useMemo(() => {
-    if (!waistFit.result || !source) {
-      return [] as Array<{ z: number; wFitAxis: number }>;
-    }
-    const span = roundedXAxisMax - roundedXAxisMin;
-    if (span <= 0) {
-      return [];
-    }
-    const { zMm: fitZ0, waistRadiusMm: fitW0 } = waistFit.result;
-    const SAMPLE_COUNT = 120;
-    const points: Array<{ z: number; wFitAxis: number }> = [];
-    for (let i = 0; i <= SAMPLE_COUNT; i += 1) {
-      const z = roundedXAxisMin + (span * i) / SAMPLE_COUNT;
-      points.push({ z, wFitAxis: beamRadiusFromWaist(fitW0, fitZ0, z, source.wavelength) * axisScale });
-    }
-    return points;
-  }, [waistFit.result, source, roundedXAxisMin, roundedXAxisMax, axisScale]);
-
   const chartData: Array<Record<string, number | null>> = profileData.map((point) => {
     const scaled: Record<string, number | null> = {
       z: point.z,
@@ -677,6 +713,9 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
       if (typeof value === 'number') {
         scaled[`eigenmode_${area.id}Axis`] = value * axisScale;
       }
+    }
+    if (typeof point.waistFitFit === 'number') {
+      scaled.waistFitFitAxis = point.waistFitFit * axisScale;
     }
     return scaled;
   });
@@ -741,9 +780,33 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
     };
 
     measure();
-    const observer = new ResizeObserver(measure);
-    observer.observe(frame);
-    return () => observer.disconnect();
+    const resizeObserver = new ResizeObserver(measure);
+    resizeObserver.observe(frame);
+
+    // ResizeObserver alone only re-measures once the frame's own box size
+    // changes - it won't necessarily fire again just because recharts
+    // finishes its internal (async) layout pass and injects the grid
+    // background a moment after mount, while the frame's size stays put.
+    // Watch for that DOM insertion directly, but only until it's found:
+    // this measurement itself re-renders elements inside this same frame
+    // (axis edge fields, path markers, ...), so watching indefinitely with
+    // subtree:true would keep re-triggering on its own resulting mutations.
+    let mutationObserver: MutationObserver | null = null;
+    if (!frame.querySelector('.recharts-cartesian-grid-bg')) {
+      mutationObserver = new MutationObserver(() => {
+        if (frame.querySelector('.recharts-cartesian-grid-bg')) {
+          measure();
+          mutationObserver?.disconnect();
+          mutationObserver = null;
+        }
+      });
+      mutationObserver.observe(frame, { childList: true, subtree: true });
+    }
+
+    return () => {
+      resizeObserver.disconnect();
+      mutationObserver?.disconnect();
+    };
   }, [roundedXAxisMin, roundedXAxisMax, roundedYAxisMin, roundedYAxisMax, axisUnitLabel]);
 
   const hoveredPoint = hoveredZMm !== null ? nearestProfilePoint(profileData, hoveredZMm) : null;
@@ -822,6 +885,10 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
             return;
           }
 
+          // Otherwise this would also bubble up to the frame's own
+          // onPointerDown and simultaneously start a zoom-box drag whenever
+          // the zoom tool happens to be armed.
+          event.stopPropagation();
           event.preventDefault();
           setDraggingComponentId(marker.id);
           event.currentTarget.setPointerCapture(event.pointerId);
@@ -856,17 +923,109 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
     );
   };
 
+  // Converts a point in frame-relative pixels (as measured against
+  // plotBounds, same as everywhere else in this component) into the z/w
+  // values it corresponds to - w is in the axis's current display units
+  // (um or mm), matching what the edge NumericFields show.
+  const pxToZoomData = (px: { x: number; y: number }) => {
+    if (!plotBounds || plotBounds.width <= 0 || plotBounds.height <= 0) {
+      return null;
+    }
+    const ratioX = (px.x - plotBounds.left) / plotBounds.width;
+    const ratioY = (px.y - plotBounds.top) / plotBounds.height;
+    const z = roundedXAxisMin + ratioX * (roundedXAxisMax - roundedXAxisMin);
+    // Pixel y grows downward but the axis grows upward, so the top of the
+    // drag rectangle maps to the axis max, not the min.
+    const wDisplay = roundedYAxisMax - ratioY * (roundedYAxisMax - roundedYAxisMin);
+    return { z, wDisplay };
+  };
+
+  // Drag-to-zoom: while the magnifying-glass tool is armed, dragging a
+  // rectangle over the plot locks both axes to exactly that bounded region.
+  // Pointer capture + window-level listeners (rather than plain onMouseMove/
+  // onMouseUp on the frame) keep the drag tracking smoothly even if the
+  // cursor briefly leaves the frame - same pattern as the path markers above.
+  const handleZoomPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!zoomToolActive) {
+      return;
+    }
+    // Don't hijack clicks on the axis lock buttons or the min/max edit
+    // fields overlaid on the frame - only an empty-space drag starts a zoom.
+    if ((event.target as HTMLElement).closest('input, button')) {
+      return;
+    }
+    const frame = frameRef.current;
+    if (!frame) {
+      return;
+    }
+
+    event.preventDefault();
+    const frameRect = frame.getBoundingClientRect();
+    const start = { x: event.clientX - frameRect.left, y: event.clientY - frameRect.top };
+    setZoomDragStartPx(start);
+    setZoomDragCurrentPx(start);
+    event.currentTarget.setPointerCapture(event.pointerId);
+
+    const onMove = (moveEvent: PointerEvent) => {
+      setZoomDragCurrentPx({ x: moveEvent.clientX - frameRect.left, y: moveEvent.clientY - frameRect.top });
+    };
+    const onUp = (upEvent: PointerEvent) => {
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      const end = { x: upEvent.clientX - frameRect.left, y: upEvent.clientY - frameRect.top };
+      setZoomDragStartPx(null);
+      setZoomDragCurrentPx(null);
+      setZoomToolActive(false);
+
+      // Too small a drag to be an intentional selection - ignore it rather
+      // than snapping to a near-zero-size range.
+      if (Math.abs(end.x - start.x) < 6 || Math.abs(end.y - start.y) < 6) {
+        return;
+      }
+      const startData = pxToZoomData(start);
+      const endData = pxToZoomData(end);
+      if (!startData || !endData) {
+        return;
+      }
+      applyXRange(Math.max(0, Math.min(startData.z, endData.z)), Math.max(startData.z, endData.z));
+      applyYRange(
+        Math.max(0, Math.min(startData.wDisplay, endData.wDisplay)) / axisScale,
+        Math.max(startData.wDisplay, endData.wDisplay) / axisScale,
+      );
+    };
+
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  };
+
   return (
     <div className="profile-chart-shell">
       <div className="profile-chart-toolbar">
-        {liveOverlap !== null ? (
-          <div className="profile-overlap-chip">
-            <strong>Overlap</strong>
-            <span>{(liveOverlap * 100).toFixed(1)}%</span>
-          </div>
-        ) : (
-          <span />
-        )}
+        <div className="profile-view-tools">
+          <button
+            type="button"
+            className="icon-button"
+            aria-label={zoomToolActive ? 'Cancel zoom selection' : 'Zoom to selection'}
+            aria-pressed={zoomToolActive}
+            title="Drag a box on the chart to zoom into it"
+            onClick={() => setZoomToolActive((active) => !active)}
+          >
+            <SearchIcon className={zoomToolActive ? 'icon-glyph profile-zoom-tool-active' : 'icon-glyph'} />
+          </button>
+          <button
+            type="button"
+            className="icon-button"
+            aria-label="Reset view"
+            title="Reset view"
+            disabled={!lockXAxis && !lockYAxis}
+            onClick={() => {
+              setLockXAxis(false);
+              setLockYAxis(false);
+            }}
+          >
+            <FullscreenIcon />
+          </button>
+        </div>
         <div className="profile-chart-toolbar-toggles">
           <label className="profile-gouy-toggle">
             <input
@@ -888,12 +1047,29 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
           )}
         </div>
       </div>
-      <div className="profile-chart-frame" ref={frameRef}>
+      {chipPositions.length > 0 && (
+        <div className="profile-chip-lane">
+          <div className="profile-overlap-chip profile-overlap-caption">
+            <strong>Overlap:</strong>
+          </div>
+          {chipPositions.map((chip) => (
+            <div className="profile-overlap-chip profile-overlap-chip--pinned" key={chip.id} style={{ left: `${chip.x}px` }}>
+              <strong>{chip.label}</strong>
+              <span style={{ color: overlapColorVar(chip.overlap) }}>{(chip.overlap * 100).toFixed(1)}%</span>
+            </div>
+          ))}
+        </div>
+      )}
+      <div
+        className={zoomToolActive ? 'profile-chart-frame profile-chart-frame--zooming' : 'profile-chart-frame'}
+        ref={frameRef}
+        onPointerDown={handleZoomPointerDown}
+      >
         <div style={{ width: '100%', height: '100%' }}>
           <ResponsiveContainer>
             <ComposedChart
               data={chartData}
-              margin={{ top: 26, right: 16, bottom: 56, left: 54 }}
+              margin={{ top: 30, right: 16, bottom: 56, left: 54 }}
               onMouseMove={(state: any) => {
                 const z = typeof state?.activeLabel === 'number' ? state.activeLabel : null;
                 onHoverZMm(z);
@@ -933,13 +1109,7 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
                   fill={marker.isOpticallyActive ? 'rgba(61, 126, 166, 0.16)' : 'rgba(138, 147, 156, 0.14)'}
                   stroke={marker.isOpticallyActive ? 'rgba(61, 126, 166, 0.45)' : 'rgba(138, 147, 156, 0.4)'}
                   strokeWidth={1}
-                  label={{
-                    value: marker.label,
-                    position: 'insideTop',
-                    fill: marker.isOpticallyActive ? '#3d7ea6' : '#6f7f91',
-                    fontSize: 11,
-                    fontWeight: 600,
-                  }}
+                  label={renderMarkerLabel(marker.label, marker.isOpticallyActive ? '#3d7ea6' : '#6f7f91', 600)}
                 />
               ))}
               <XAxis
@@ -1013,7 +1183,7 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
                   x={marker.z}
                   stroke="var(--chart-neutral-line)"
                   strokeDasharray="4 4"
-                  label={{ value: marker.label, position: 'insideTop', fill: 'var(--chart-axis-text)', fontSize: 11 }}
+                  label={renderMarkerLabel(marker.label, 'var(--chart-axis-text)')}
                 />
               ))}
 
@@ -1023,7 +1193,7 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
                   x={marker.z}
                   stroke="#c0392b"
                   strokeWidth={2}
-                  label={{ value: `${marker.label} (beam stop)`, position: 'insideTop', fill: '#c0392b', fontSize: 11, fontWeight: 700 }}
+                  label={renderMarkerLabel(`${marker.label} (beam stop)`, '#c0392b', 700)}
                 />
               ))}
 
@@ -1034,7 +1204,7 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
                     x={marker.z}
                     stroke="#9013fe"
                     strokeDasharray="4 4"
-                    label={renderCavityMirrorLabel(marker.label, '#6b1fc9')}
+                    label={renderMarkerLabel(marker.label, 'var(--chart-axis-text)')}
                   />
                 ) : (
                   <ReferenceLine
@@ -1051,21 +1221,6 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
                   />
                 ),
               )}
-
-              {cavityOverlapMarkers.map((marker, index) => (
-                <ReferenceLine
-                  key={`cavity-overlap-${index}`}
-                  x={marker.z}
-                  stroke="transparent"
-                  label={{
-                    value: `mode match ${marker.label}`,
-                    position: 'top',
-                    fill: marker.good ? '#1a7f37' : '#c0392b',
-                    fontSize: 11,
-                    fontWeight: 700,
-                  }}
-                />
-              ))}
 
               {hoveredPoint && (
                 <>
@@ -1096,10 +1251,9 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
                 />
               ))}
 
-              {waistFitCurveData.length > 0 && (
+              {waistFit.result && (
                 <Line
-                  data={waistFitCurveData}
-                  dataKey="wFitAxis"
+                  dataKey="waistFitFitAxis"
                   type="monotone"
                   stroke="#16a34a"
                   strokeWidth={2}
@@ -1108,6 +1262,7 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
                   isAnimationActive={false}
                   legendType="none"
                   tooltipType="none"
+                  connectNulls={false}
                 />
               )}
 
@@ -1125,6 +1280,18 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
             </ComposedChart>
           </ResponsiveContainer>
         </div>
+
+        {zoomDragStartPx && zoomDragCurrentPx && (
+          <div
+            className="profile-zoom-selection"
+            style={{
+              left: `${Math.min(zoomDragStartPx.x, zoomDragCurrentPx.x)}px`,
+              top: `${Math.min(zoomDragStartPx.y, zoomDragCurrentPx.y)}px`,
+              width: `${Math.abs(zoomDragCurrentPx.x - zoomDragStartPx.x)}px`,
+              height: `${Math.abs(zoomDragCurrentPx.y - zoomDragStartPx.y)}px`,
+            }}
+          />
+        )}
 
         {plotBounds &&
           lensMarkers.map((marker) => renderDraggablePathMarker(marker, 'profile-lens-marker'))}
@@ -1150,9 +1317,9 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
               <NumericField
                 aria-label="X axis minimum (mm)"
                 className="profile-axis-edge-input"
-                value={effectiveXMinMm}
+                value={roundedXAxisMin}
                 format={formatAxisMax}
-                onCommit={(value) => applyXRange(value, effectiveXMaxMm)}
+                onCommit={(value) => applyXRange(value, roundedXAxisMax)}
               />
             </div>
             <div
@@ -1165,17 +1332,28 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
               <NumericField
                 aria-label="X axis maximum (mm)"
                 className="profile-axis-edge-input"
-                value={effectiveXMaxMm}
+                value={roundedXAxisMax}
                 format={formatAxisMax}
-                onCommit={(value) => applyXRange(effectiveXMinMm, value)}
+                onCommit={(value) => applyXRange(roundedXAxisMin, value)}
               />
               <button
                 type="button"
                 className="icon-button profile-axis-edge-lock"
                 aria-label={lockXAxis ? 'Unlock X axis range' : 'Lock X axis range'}
-                onClick={() => setLockXAxis((locked) => !locked)}
+                onClick={() => {
+                  // Engaging the lock should freeze the range exactly as
+                  // currently displayed (the rounded auto-fit bounds) rather
+                  // than the unrounded lockedXMaxMm the sync effect below
+                  // keeps updating in the background - otherwise the axis
+                  // visibly snaps to that unrounded value the instant it locks.
+                  if (!lockXAxis) {
+                    setLockedXMinMm(roundedXAxisMin);
+                    setLockedXMaxMm(roundedXAxisMax);
+                  }
+                  setLockXAxis((locked) => !locked);
+                }}
               >
-                <img className="icon-glyph" src={lockXAxis ? lockIcon : lockOpenIcon} alt="" />
+                <LockIcon locked={lockXAxis} />
               </button>
             </div>
             <div
@@ -1185,9 +1363,9 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
               <NumericField
                 aria-label={`Y axis minimum (${axisUnitLabel})`}
                 className="profile-axis-edge-input"
-                value={effectiveYMinMm * axisScale}
+                value={roundedYAxisMin}
                 format={formatAxisMax}
-                onCommit={(value) => applyYRange(value / axisScale, effectiveYMaxMm)}
+                onCommit={(value) => applyYRange(value / axisScale, roundedYAxisMax / axisScale)}
               />
             </div>
             <div
@@ -1198,16 +1376,26 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
                 type="button"
                 className="icon-button profile-axis-edge-lock"
                 aria-label={lockYAxis ? 'Unlock Y axis range' : 'Lock Y axis range'}
-                onClick={() => setLockYAxis((locked) => !locked)}
+                onClick={() => {
+                  // Same reasoning as the X axis lock button above: freeze
+                  // the currently-displayed (rounded) bounds instead of the
+                  // unrounded lockedYMaxMm the sync effect keeps updating,
+                  // so the axis doesn't visibly snap the instant it locks.
+                  if (!lockYAxis) {
+                    setLockedYMinMm(roundedYAxisMin / axisScale);
+                    setLockedYMaxMm(roundedYAxisMax / axisScale);
+                  }
+                  setLockYAxis((locked) => !locked);
+                }}
               >
-                <img className="icon-glyph" src={lockYAxis ? lockIcon : lockOpenIcon} alt="" />
+                <LockIcon locked={lockYAxis} />
               </button>
               <NumericField
                 aria-label={`Y axis maximum (${axisUnitLabel})`}
                 className="profile-axis-edge-input"
-                value={effectiveYMaxMm * axisScale}
+                value={roundedYAxisMax}
                 format={formatAxisMax}
-                onCommit={(value) => applyYRange(effectiveYMinMm, value / axisScale)}
+                onCommit={(value) => applyYRange(roundedYAxisMin / axisScale, value / axisScale)}
               />
             </div>
           </>

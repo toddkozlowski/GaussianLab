@@ -434,5 +434,25 @@ describe('appStateReducer', () => {
       const newState = appStateReducer(state, { type: 'RESET_STATE' });
       expect(newState.waistFit).toEqual(DEFAULT_APP_STATE.waistFit);
     });
+
+    it('CLEAR_WAIST_FIT_POINTS resets the points and result, but preserves showOnBeamPath', () => {
+      const state = {
+        ...DEFAULT_APP_STATE,
+        waistFit: {
+          points: [
+            { id: 'a', zMm: 1, waistRadiusMm: 2 },
+            { id: 'b', zMm: 3, waistRadiusMm: 4 },
+          ],
+          showOnBeamPath: false,
+          result: { zMm: 1, waistRadiusMm: 0.1 },
+        },
+      };
+
+      const newState = appStateReducer(state, { type: 'CLEAR_WAIST_FIT_POINTS', payload: {} });
+
+      expect(newState.waistFit.points).toEqual(DEFAULT_APP_STATE.waistFit.points);
+      expect(newState.waistFit.result).toBeNull();
+      expect(newState.waistFit.showOnBeamPath).toBe(false); // untouched
+    });
   });
 });
