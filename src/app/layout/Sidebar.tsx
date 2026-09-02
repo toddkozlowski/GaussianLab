@@ -77,6 +77,7 @@ function downloadTextFile(filename: string, content: string) {
 export function Sidebar() {
   const { state, dispatch, runSolver, applySolution, resetTable } = useAppStore();
   const { theme, toggleTheme } = useTheme();
+  const [componentsOpen, setComponentsOpen] = useState(true);
   const [modeMatchingOpen, setModeMatchingOpen] = useState(true);
   const [waistFitOpen, setWaistFitOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -383,16 +384,24 @@ export function Sidebar() {
         ? state.targetMode.targetComponentId
         : '';
 
+  // The component table's own row size (when open) depends on whether Mode
+  // Matching or Waist Fit is also open and sharing space with it below -
+  // same sizes the old fixed ternary used, just factored out so components
+  // can now also collapse to 'auto' independently of those two.
+  const componentsRowSize = !componentsOpen
+    ? 'auto'
+    : modeMatchingOpen || waistFitOpen
+      ? 'minmax(160px, 1fr)'
+      : 'minmax(280px, 1.35fr)';
+  const modeMatchingRowSize = modeMatchingOpen ? 'minmax(160px, 1fr)' : 'auto';
+  const waistFitRowSize = waistFitOpen ? 'minmax(160px, 1fr)' : 'auto';
+
   return (
     <aside
       className="sidebar"
       aria-label="Simulation controls"
       style={{
-        gridTemplateRows: modeMatchingOpen
-          ? 'auto minmax(160px, 1fr) minmax(160px, 1fr) auto'
-          : waistFitOpen
-            ? 'auto minmax(160px, 1fr) auto minmax(160px, 1fr)'
-            : 'auto minmax(280px, 1.35fr) auto auto',
+        gridTemplateRows: `auto ${componentsRowSize} ${modeMatchingRowSize} ${waistFitRowSize}`,
       }}
     >
       <section className="panel file-toolbar-panel">
@@ -438,14 +447,21 @@ export function Sidebar() {
       </section>
 
       <section className="panel component-panel">
-        <header className="panel-header">
-          <div>
+        <header className={componentsOpen ? 'panel-header' : 'panel-header panel-header--collapsed'}>
+          <button
+            type="button"
+            className="mode-matching-header-toggle header-toggle-with-help"
+            aria-expanded={componentsOpen}
+            onClick={() => setComponentsOpen((open) => !open)}
+          >
             <h3>Beam Path Components</h3>
-          </div>
+            <ChevronCircleIcon direction={componentsOpen ? 'down' : 'up'} />
+          </button>
           <HelpPopout summaryAriaLabel="Open help">
             Select a row to focus the same component on the canvas. Edit values inline.
           </HelpPopout>
         </header>
+        {componentsOpen && (
         <div className="panel-body component-table-panel">
           <div className="component-toolbar">
             <button type="button" onClick={addMirror}>+ Mirror</button>
@@ -589,6 +605,7 @@ export function Sidebar() {
             </table>
           </div>
         </div>
+        )}
       </section>
 
       <section className="panel mode-matching-panel">

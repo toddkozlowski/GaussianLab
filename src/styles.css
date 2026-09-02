@@ -540,10 +540,11 @@ button:disabled {
   gap: 8px;
 }
 
-/* Overrides .mode-matching-header-toggle's width: 100% - this header also
-   has a HelpPopout sitting after the toggle button, so the button should
-   only claim the space it needs rather than pushing the popout out. */
-.profile-header-toggle {
+/* Overrides .mode-matching-header-toggle's width: 100% - for a collapsible
+   header that also has a HelpPopout sitting after the toggle button, so the
+   button should only claim the space it needs rather than pushing the
+   popout out. */
+.header-toggle-with-help {
   width: auto;
   flex: 1;
   min-width: 0;
@@ -1038,23 +1039,23 @@ button:disabled {
 
 .profile-chart-shell {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 6px;
   height: 100%;
   min-height: 0;
 }
 
 /* Fixed height (rather than sizing to its absolutely-positioned chip
-   children, which wouldn't contribute to it) so the row above the chart
-   frame stays a consistent height whether or not any chips are showing.
-   Explicit grid-row placements here and on .profile-chart-toolbar/
-   .profile-chart-frame mean this row can be omitted entirely (no cavities
-   or targets to report on) without the frame below sliding up to take its
-   track - each element always keeps its own assigned row. */
+   children, which wouldn't contribute to it) so this row stays a
+   consistent height whether or not any chips are showing. An explicit
+   grid-row here and on .profile-chart-frame means this row can be omitted
+   entirely (no cavities or targets to report on) without the frame below
+   sliding up to take its track - each element always keeps its own
+   assigned row. */
 .profile-chip-lane {
   position: relative;
   height: 30px;
-  grid-row: 2;
+  grid-row: 1;
 }
 
 .profile-overlap-caption {
@@ -1070,13 +1071,28 @@ button:disabled {
   white-space: nowrap;
 }
 
-.profile-chart-toolbar {
+/* The zoom/reset-view buttons and the Gouy-phase toggle used to live in a
+   toolbar row above the chart frame; both are now pinned directly over the
+   frame instead (see BeamProfileChart.tsx) so that row's height goes back
+   to the chart. */
+.profile-view-tools {
   display: flex;
-  justify-content: space-between;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 14px;
-  grid-row: 1;
+  gap: 6px;
+}
+
+/* Anchored at the same origin point as .profile-axis-edge-field--y-min,
+   with the same horizontal transform (right-edge flush, .. - 6px left of
+   the y-axis) so the two form one aligned column in the corner regardless
+   of either element's own width - the button row sits just below the axis
+   line where .profile-axis-edge-field--y-min sits just above it. */
+.profile-view-tools--pinned {
+  position: absolute;
+  transform: translate(calc(-100% - 6px), 4px);
+  z-index: 3;
+}
+
+.profile-zoom-tool-active {
+  color: #2d9bf0;
 }
 
 .profile-chart-toolbar-toggles {
@@ -1086,13 +1102,10 @@ button:disabled {
   gap: 14px;
 }
 
-.profile-view-tools {
-  display: flex;
-  gap: 6px;
-}
-
-.profile-zoom-tool-active {
-  color: #2d9bf0;
+.profile-gouy-toggle-group--pinned {
+  position: absolute;
+  transform: translate(-100%, -100%);
+  z-index: 3;
 }
 
 .profile-gouy-toggle {
@@ -1112,7 +1125,7 @@ button:disabled {
   position: relative;
   height: 100%;
   min-height: 0;
-  grid-row: 3;
+  grid-row: 2;
 }
 
 .profile-chart-frame--zooming {

@@ -43,7 +43,7 @@ export function ProfilePane({ hoveredZMm, onHoverZMm, profileOpen, onToggleProfi
       <header className={profileOpen ? 'panel-header' : 'panel-header panel-header--collapsed'}>
         <button
           type="button"
-          className="mode-matching-header-toggle profile-header-toggle"
+          className="mode-matching-header-toggle header-toggle-with-help"
           aria-expanded={profileOpen}
           onClick={onToggleProfileOpen}
         >

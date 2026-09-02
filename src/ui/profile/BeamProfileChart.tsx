@@ -130,8 +130,8 @@ function renderGouyPhaseAxisLabel(props: any) {
 /**
  * The default 'insideBottomRight' position sits right at the axis line,
  * which collides with the editable X-max field overlaid just below it.
- * Render the title further down (still inside the chart's own bottom
- * margin) so the two never overlap.
+ * Render the title just under that field instead (still inside the
+ * chart's own bottom margin) so the two never overlap.
  */
 function renderXAxisLabel(props: any) {
   const viewBox = props?.viewBox;
@@ -139,7 +139,7 @@ function renderXAxisLabel(props: any) {
     return <g />;
   }
   const x = viewBox.x + viewBox.width;
-  const y = viewBox.y + viewBox.height + 46;
+  const y = viewBox.y + viewBox.height + 30;
   return (
     <text x={x} y={y} textAnchor="end" fontSize={11} fill="var(--chart-axis-text)">
       z (mm)
@@ -150,16 +150,19 @@ function renderXAxisLabel(props: any) {
 /**
  * A component's position label, rendered just above the plotted region
  * (rather than inside it) so the dashed reference line marking that
- * component's z-position never overlaps/crosses the label text.
+ * component's z-position never overlaps/crosses the label text - unless
+ * `placeBelow` is set, when it renders just inside the plot's top edge
+ * instead, for the rare label that would otherwise land underneath the
+ * Gouy-phase toggle pinned above the plot's top-right corner.
  */
-function renderMarkerLabel(labelText: string, color: string, fontWeight = 400) {
+function renderMarkerLabel(labelText: string, color: string, fontWeight = 400, placeBelow = false) {
   return (props: any) => {
     const viewBox = props?.viewBox;
     if (!viewBox) {
       return <g />;
     }
     const x = viewBox.x + (viewBox.width ?? 0) / 2;
-    const y = viewBox.y - 8;
+    const y = placeBelow ? viewBox.y + 14 : viewBox.y - 8;
     return (
       <text x={x} y={y} textAnchor="middle" fontSize={11} fontWeight={fontWeight} fill={color}>
         {labelText}
@@ -221,10 +224,12 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
   waistFit,
 }) => {
   const frameRef = React.useRef<HTMLDivElement>(null);
+  const gouyToggleRef = React.useRef<HTMLDivElement>(null);
   const [draggingComponentId, setDraggingComponentId] = useState<string | null>(null);
   const [plotBounds, setPlotBounds] = useState<{ left: number; top: number; width: number; height: number } | null>(
     null,
   );
+  const [gouyToggleWidth, setGouyToggleWidth] = useState(0);
 
   const baseProfile: ProfilePoint[] =
     propagationResult && propagationResult.profile.length > 0
@@ -764,6 +769,8 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
       return;
     }
 
+    let gridResizeObserver: ResizeObserver | null = null;
+
     const measure = () => {
       const gridBg = frame.querySelector('.recharts-cartesian-grid-bg');
       if (!gridBg) {
@@ -777,37 +784,60 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
         width: gridRect.width,
         height: gridRect.height,
       });
+
+      // Recharts can re-inset the grid (e.g. the Y axis label width
+      // changing with tick digit count) without the outer frame's own box
+      // changing size at all, which the frame-level observer below
+      // wouldn't catch on its own.
+      if (!gridResizeObserver) {
+        gridResizeObserver = new ResizeObserver(measure);
+        gridResizeObserver.observe(gridBg);
+      }
     };
 
     measure();
-    const resizeObserver = new ResizeObserver(measure);
-    resizeObserver.observe(frame);
+    const frameResizeObserver = new ResizeObserver(measure);
+    frameResizeObserver.observe(frame);
 
-    // ResizeObserver alone only re-measures once the frame's own box size
-    // changes - it won't necessarily fire again just because recharts
-    // finishes its internal (async) layout pass and injects the grid
-    // background a moment after mount, while the frame's size stays put.
-    // Watch for that DOM insertion directly, but only until it's found:
-    // this measurement itself re-renders elements inside this same frame
-    // (axis edge fields, path markers, ...), so watching indefinitely with
-    // subtree:true would keep re-triggering on its own resulting mutations.
-    let mutationObserver: MutationObserver | null = null;
-    if (!frame.querySelector('.recharts-cartesian-grid-bg')) {
-      mutationObserver = new MutationObserver(() => {
-        if (frame.querySelector('.recharts-cartesian-grid-bg')) {
-          measure();
-          mutationObserver?.disconnect();
-          mutationObserver = null;
-        }
-      });
-      mutationObserver.observe(frame, { childList: true, subtree: true });
-    }
+    // Neither observer above necessarily catches the surrounding page's own
+    // layout still settling for a frame or two after mount (fonts, sibling
+    // panels, etc.) - a pure reflow with no element actually changing size.
+    // Left unaddressed, that stale first measurement stuck around wrong
+    // (path-marker handles rendered below the axis instead of centered on
+    // it) until some unrelated interaction happened to trigger a fresh
+    // measurement. Re-measuring for a few frames after mount catches the
+    // final settled layout instead.
+    let rafCount = 0;
+    let rafId = requestAnimationFrame(function tick() {
+      measure();
+      rafCount += 1;
+      if (rafCount < 6) {
+        rafId = requestAnimationFrame(tick);
+      }
+    });
 
     return () => {
-      resizeObserver.disconnect();
-      mutationObserver?.disconnect();
+      frameResizeObserver.disconnect();
+      gridResizeObserver?.disconnect();
+      cancelAnimationFrame(rafId);
     };
   }, [roundedXAxisMin, roundedXAxisMax, roundedYAxisMin, roundedYAxisMax, axisUnitLabel]);
+
+  // Measures the Gouy-phase toggle's own rendered width (it grows once the
+  // "Wrap phase" checkbox appears) so component labels can tell whether
+  // they'd land underneath it - see isInGouyToggleZone below.
+  useLayoutEffect(() => {
+    const toggle = gouyToggleRef.current;
+    if (!toggle) {
+      setGouyToggleWidth(0);
+      return;
+    }
+    const measure = () => setGouyToggleWidth(toggle.getBoundingClientRect().width);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(toggle);
+    return () => observer.disconnect();
+  }, [showGouyPhase]);
 
   const hoveredPoint = hoveredZMm !== null ? nearestProfilePoint(profileData, hoveredZMm) : null;
   const hoveredPointAxisY = hoveredPoint ? hoveredPoint.w * axisScale : null;
@@ -923,6 +953,34 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
     );
   };
 
+  // z (mm) -> the frame-relative pixel x it plots at, same mapping used
+  // throughout this component for positioning HTML overlays against the
+  // chart's SVG coordinate space.
+  const zToPlotPx = (z: number): number | null => {
+    if (!plotBounds) {
+      return null;
+    }
+    const zSpan = roundedXAxisMax - roundedXAxisMin;
+    const ratio = zSpan > 0 ? (z - roundedXAxisMin) / zSpan : 0;
+    return plotBounds.left + ratio * plotBounds.width;
+  };
+
+  // The Gouy-phase toggle is pinned above the plot's top-right corner (see
+  // the JSX below) - a component label landing in that same horizontal
+  // span needs to render inside the plot instead of above it, or the two
+  // would overlap.
+  const isInGouyToggleZone = (z: number): boolean => {
+    if (!plotBounds || gouyToggleWidth <= 0) {
+      return false;
+    }
+    const xPx = zToPlotPx(z);
+    if (xPx === null) {
+      return false;
+    }
+    const zoneStart = plotBounds.left + plotBounds.width - gouyToggleWidth - 8;
+    return xPx >= zoneStart;
+  };
+
   // Converts a point in frame-relative pixels (as measured against
   // plotBounds, same as everywhere else in this component) into the z/w
   // values it corresponds to - w is in the axis's current display units
@@ -1000,53 +1058,6 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
 
   return (
     <div className="profile-chart-shell">
-      <div className="profile-chart-toolbar">
-        <div className="profile-view-tools">
-          <button
-            type="button"
-            className="icon-button"
-            aria-label={zoomToolActive ? 'Cancel zoom selection' : 'Zoom to selection'}
-            aria-pressed={zoomToolActive}
-            title="Drag a box on the chart to zoom into it"
-            onClick={() => setZoomToolActive((active) => !active)}
-          >
-            <SearchIcon className={zoomToolActive ? 'icon-glyph profile-zoom-tool-active' : 'icon-glyph'} />
-          </button>
-          <button
-            type="button"
-            className="icon-button"
-            aria-label="Reset view"
-            title="Reset view"
-            disabled={!lockXAxis && !lockYAxis}
-            onClick={() => {
-              setLockXAxis(false);
-              setLockYAxis(false);
-            }}
-          >
-            <FullscreenIcon />
-          </button>
-        </div>
-        <div className="profile-chart-toolbar-toggles">
-          <label className="profile-gouy-toggle">
-            <input
-              type="checkbox"
-              checked={showGouyPhase}
-              onChange={(event) => setShowGouyPhase(event.target.checked)}
-            />
-            Gouy phase
-          </label>
-          {showGouyPhase && (
-            <label className="profile-gouy-toggle">
-              <input
-                type="checkbox"
-                checked={gouyPhaseWrapped}
-                onChange={(event) => setGouyPhaseWrapped(event.target.checked)}
-              />
-              Wrap phase
-            </label>
-          )}
-        </div>
-      </div>
       {chipPositions.length > 0 && (
         <div className="profile-chip-lane">
           <div className="profile-overlap-chip profile-overlap-caption">
@@ -1069,7 +1080,7 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
           <ResponsiveContainer>
             <ComposedChart
               data={chartData}
-              margin={{ top: 30, right: 16, bottom: 56, left: 54 }}
+              margin={{ top: 30, right: 16, bottom: 44, left: 34 }}
               onMouseMove={(state: any) => {
                 const z = typeof state?.activeLabel === 'number' ? state.activeLabel : null;
                 onHoverZMm(z);
@@ -1109,7 +1120,12 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
                   fill={marker.isOpticallyActive ? 'rgba(61, 126, 166, 0.16)' : 'rgba(138, 147, 156, 0.14)'}
                   stroke={marker.isOpticallyActive ? 'rgba(61, 126, 166, 0.45)' : 'rgba(138, 147, 156, 0.4)'}
                   strokeWidth={1}
-                  label={renderMarkerLabel(marker.label, marker.isOpticallyActive ? '#3d7ea6' : '#6f7f91', 600)}
+                  label={renderMarkerLabel(
+                    marker.label,
+                    marker.isOpticallyActive ? '#3d7ea6' : '#6f7f91',
+                    600,
+                    isInGouyToggleZone(marker.z + marker.thickness / 2),
+                  )}
                 />
               ))}
               <XAxis
@@ -1183,7 +1199,7 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
                   x={marker.z}
                   stroke="var(--chart-neutral-line)"
                   strokeDasharray="4 4"
-                  label={renderMarkerLabel(marker.label, 'var(--chart-axis-text)')}
+                  label={renderMarkerLabel(marker.label, 'var(--chart-axis-text)', 400, isInGouyToggleZone(marker.z))}
                 />
               ))}
 
@@ -1193,7 +1209,7 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
                   x={marker.z}
                   stroke="#c0392b"
                   strokeWidth={2}
-                  label={renderMarkerLabel(`${marker.label} (beam stop)`, '#c0392b', 700)}
+                  label={renderMarkerLabel(`${marker.label} (beam stop)`, '#c0392b', 700, isInGouyToggleZone(marker.z))}
                 />
               ))}
 
@@ -1204,7 +1220,7 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
                     x={marker.z}
                     stroke="#9013fe"
                     strokeDasharray="4 4"
-                    label={renderMarkerLabel(marker.label, 'var(--chart-axis-text)')}
+                    label={renderMarkerLabel(marker.label, 'var(--chart-axis-text)', 400, isInGouyToggleZone(marker.z))}
                   />
                 ) : (
                   <ReferenceLine
@@ -1291,6 +1307,64 @@ export const BeamProfileChart: React.FC<BeamProfileChartProps> = ({
               height: `${Math.abs(zoomDragCurrentPx.y - zoomDragStartPx.y)}px`,
             }}
           />
+        )}
+
+        {plotBounds && (
+          <div
+            className="profile-view-tools profile-view-tools--pinned"
+            style={{ left: `${plotBounds.left}px`, top: `${plotBounds.top + plotBounds.height}px` }}
+          >
+            <button
+              type="button"
+              className="icon-button"
+              aria-label={zoomToolActive ? 'Cancel zoom selection' : 'Zoom to selection'}
+              aria-pressed={zoomToolActive}
+              title="Drag a box on the chart to zoom into it"
+              onClick={() => setZoomToolActive((active) => !active)}
+            >
+              <SearchIcon className={zoomToolActive ? 'icon-glyph profile-zoom-tool-active' : 'icon-glyph'} />
+            </button>
+            <button
+              type="button"
+              className="icon-button"
+              aria-label="Reset view"
+              title="Reset view"
+              disabled={!lockXAxis && !lockYAxis}
+              onClick={() => {
+                setLockXAxis(false);
+                setLockYAxis(false);
+              }}
+            >
+              <FullscreenIcon />
+            </button>
+          </div>
+        )}
+
+        {plotBounds && (
+          <div
+            ref={gouyToggleRef}
+            className="profile-chart-toolbar-toggles profile-gouy-toggle-group--pinned"
+            style={{ left: `${plotBounds.left + plotBounds.width}px`, top: `${plotBounds.top}px` }}
+          >
+            <label className="profile-gouy-toggle">
+              <input
+                type="checkbox"
+                checked={showGouyPhase}
+                onChange={(event) => setShowGouyPhase(event.target.checked)}
+              />
+              Gouy phase
+            </label>
+            {showGouyPhase && (
+              <label className="profile-gouy-toggle">
+                <input
+                  type="checkbox"
+                  checked={gouyPhaseWrapped}
+                  onChange={(event) => setGouyPhaseWrapped(event.target.checked)}
+                />
+                Wrap phase
+              </label>
+            )}
+          </div>
         )}
 
         {plotBounds &&
